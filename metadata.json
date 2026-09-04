@@ -1,0 +1,7 @@
+{
+  "name": "Media Downloader",
+  "description": "Media downloader to crawl season directories, extract video episodes, and download movies with real-time speed tracking and pause/cancel controls directly to chosen storage folder.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

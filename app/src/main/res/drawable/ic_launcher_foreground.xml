@@ -1,0 +1,21 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Server/Cloud/Folder base tray -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M32,68 L32,74 C32,76.2 33.8,78 36,78 L72,78 C74.2,78 76,76.2 76,74 L76,68 L70,68 L70,72 L38,72 L38,68 Z" />
+    
+    <!-- Bold Downward Download Arrow -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M51,28 L57,28 L57,48 L66,48 L54,62 L42,48 L51,48 Z" />
+        
+    <!-- Media Play Accent dot/indicator -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M54,67 A3,3 0 1,0 54,67.01 Z" />
+</vector>
+
