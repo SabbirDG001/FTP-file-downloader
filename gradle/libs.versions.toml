@@ -44,11 +44,18 @@ googleid = "1.1.1"
 commonsNet = "3.10.0"
 jsoup = "1.18.3"
 documentfile = "1.0.1"
+youtubedlAndroid = "0.18.1"
+webkit = "1.12.1"
+orgJson = "20240303"
 
 
 [libraries]
 commons-net = { group = "commons-net", name = "commons-net", version.ref = "commonsNet" }
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
+androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
+org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
+youtubedl-android-library = { group = "io.github.junkfood02.youtubedl-android", name = "library", version.ref = "youtubedlAndroid" }
+youtubedl-android-ffmpeg = { group = "io.github.junkfood02.youtubedl-android", name = "ffmpeg", version.ref = "youtubedlAndroid" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }

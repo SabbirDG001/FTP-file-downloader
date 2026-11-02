@@ -1,7 +1,6 @@
 {
   "name": "Media Downloader",
-  "description": "Media downloader to crawl season directories, extract video episodes, and download movies with real-time speed tracking and pause/cancel controls directly to chosen storage folder.",
+  "description": "Download videos and audio from YouTube, Facebook, Instagram, TikTok and more, browse FTP servers and web directories, and grab movies or whole seasons from direct links, with a background download manager (pause, resume, retry) that saves to a folder you choose.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }
-

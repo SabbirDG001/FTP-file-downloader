@@ -1,20 +1,24 @@
 package com.example.data.download
 
 import android.content.Context
-import android.net.Uri
-import com.example.data.ftp.FtpManager
-import com.example.data.ftp.HttpMediaManager
+import com.example.data.local.DownloadDao
+import com.example.data.model.DownloadSource
 import com.example.data.model.DownloadStatus
 import com.example.data.model.DownloadTask
-import com.example.data.model.FtpServerConfig
-import com.example.data.model.ServerProtocol
+import com.example.data.model.isActive
+import com.example.data.model.isRunning
+import com.example.data.settings.SettingsRepository
 import com.example.data.storage.StorageHelper
+import com.example.data.util.ErrorMessages
 import com.example.service.DownloadForegroundService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,243 +26,253 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
-class DownloadEngine private constructor(private val appContext: Context) {
+/**
+ * The download queue. Runs up to N downloads at once (Settings), supports
+ * pause / resume / cancel / retry, and saves every change to the database so the
+ * list survives app restarts. Downloads keep going in the background through
+ * [DownloadForegroundService].
+ */
+class DownloadEngine(
+    private val appContext: Context,
+    private val dao: DownloadDao,
+    private val storage: StorageHelper,
+    private val settings: SettingsRepository,
+    private val downloaders: Map<DownloadSource, MediaDownloader>
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val storageHelper = StorageHelper(appContext)
-    private val ftpManager = FtpManager()
-    private val httpMediaManager = HttpMediaManager()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val dbDispatcher = Dispatchers.IO.limitedParallelism(1)
 
-    private val activeJobs = ConcurrentHashMap<String, Job>()
+    private val jobs = ConcurrentHashMap<String, Job>()
 
     private val _tasks = MutableStateFlow<List<DownloadTask>>(emptyList())
     val tasks: StateFlow<List<DownloadTask>> = _tasks.asStateFlow()
 
-    companion object {
-        private const val MAX_CONCURRENT_DOWNLOADS = 2
-
-        @Volatile
-        private var INSTANCE: DownloadEngine? = null
-
-        fun getInstance(context: Context): DownloadEngine {
-            return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: DownloadEngine(context.applicationContext).also { INSTANCE = it }
-            }
-        }
+    init {
+        scope.launch(dbDispatcher) { restoreSavedTasks() }
     }
 
-    fun enqueueTasks(newTasks: List<DownloadTask>) {
+    // region Public actions
+
+    fun enqueue(newTasks: List<DownloadTask>) {
         if (newTasks.isEmpty()) return
         _tasks.update { it + newTasks }
-
-        // Start background foreground service so downloads continue when minimized
+        newTasks.forEach { persist(it.id) }
         DownloadForegroundService.start(appContext)
-        processNextInQueue()
+        schedule()
     }
 
-    fun cancelTask(taskId: String) {
-        val job = activeJobs.remove(taskId)
-        job?.cancel()
-
-        _tasks.update { list ->
-            list.map { task ->
-                if (task.id == taskId) {
-                    task.copy(status = DownloadStatus.CANCELED, speedBytesPerSec = 0L)
-                } else task
-            }
+    fun pause(taskId: String) {
+        val task = find(taskId) ?: return
+        if (!task.isActive) return
+        jobs.remove(taskId)?.cancel()
+        update(taskId, persist = true) {
+            it.copy(status = DownloadStatus.PAUSED, speedBytesPerSec = 0L, etaSeconds = -1L)
         }
+        schedule()
+    }
 
-        processNextInQueue()
-        checkAndStopServiceIfIdle()
+    /** Resumes a paused download, or retries a failed / cancelled one. */
+    fun resume(taskId: String) {
+        val task = find(taskId) ?: return
+        if (task.status != DownloadStatus.PAUSED &&
+            task.status != DownloadStatus.FAILED &&
+            task.status != DownloadStatus.CANCELED
+        ) return
+        update(taskId, persist = true) {
+            it.copy(status = DownloadStatus.QUEUED, errorMessage = null, speedBytesPerSec = 0L)
+        }
+        DownloadForegroundService.start(appContext)
+        schedule()
+    }
+
+    fun retry(taskId: String) = resume(taskId)
+
+    fun cancel(taskId: String) {
+        val task = find(taskId) ?: return
+        if (task.status == DownloadStatus.COMPLETED || task.status == DownloadStatus.CANCELED) return
+        val job = jobs.remove(taskId)
+        update(taskId, persist = true) {
+            it.copy(status = DownloadStatus.CANCELED, speedBytesPerSec = 0L, etaSeconds = -1L)
+        }
+        scope.launch {
+            job?.cancelAndJoin()
+            runCatching { downloaders[task.source]?.discardPartial(find(taskId) ?: task) }
+            update(taskId, persist = true) { it.copy(downloadedBytes = 0L, outputUri = null) }
+        }
+        schedule()
+    }
+
+    /** Removes a download from the list. Finished files are only deleted when [deleteFile] is true. */
+    fun remove(taskId: String, deleteFile: Boolean = false) {
+        val task = find(taskId) ?: return
+        val job = jobs.remove(taskId)
+        _tasks.update { list -> list.filterNot { it.id == taskId } }
+        scope.launch {
+            job?.cancelAndJoin()
+            if (task.status == DownloadStatus.COMPLETED) {
+                if (deleteFile) runCatching { storage.deleteFile(task.outputUri) }
+            } else {
+                runCatching { downloaders[task.source]?.discardPartial(task) }
+            }
+            launch(dbDispatcher) { runCatching { dao.delete(listOf(taskId)) } }
+        }
+        schedule()
+    }
+
+    /** Clears completed and cancelled entries from the list (files stay on the device). */
+    fun clearFinished() {
+        val finished = _tasks.value.filter {
+            it.status == DownloadStatus.COMPLETED || it.status == DownloadStatus.CANCELED
+        }.map { it.id }
+        if (finished.isEmpty()) return
+        _tasks.update { list -> list.filterNot { it.id in finished } }
+        scope.launch(dbDispatcher) { runCatching { dao.delete(finished) } }
+    }
+
+    fun pauseAll() {
+        _tasks.value.filter { it.isActive }.forEach { pause(it.id) }
+    }
+
+    fun resumeAll() {
+        _tasks.value.filter { it.status == DownloadStatus.PAUSED }.forEach { resume(it.id) }
     }
 
     fun cancelAll() {
-        activeJobs.values.forEach { it.cancel() }
-        activeJobs.clear()
+        _tasks.value.filter { it.isActive || it.status == DownloadStatus.PAUSED }.forEach { cancel(it.id) }
+    }
 
-        _tasks.update { list ->
-            list.map { task ->
-                if (task.isActive) {
-                    task.copy(status = DownloadStatus.CANCELED, speedBytesPerSec = 0L)
-                } else task
+    // endregion
+
+    // region Queue
+
+    private fun schedule() = synchronized(this) {
+        val queued = _tasks.value.filter { it.status == DownloadStatus.QUEUED && !jobs.containsKey(it.id) }
+        if (queued.isEmpty()) return@synchronized
+
+        if (storage.getSavedFolderUri() == null) {
+            queued.forEach { task ->
+                update(task.id, persist = true) {
+                    it.copy(status = DownloadStatus.FAILED, errorMessage = "Choose a download folder first")
+                }
             }
+            return@synchronized
         }
 
-        DownloadForegroundService.stop(appContext)
-    }
-
-    fun retryTask(taskId: String) {
-        _tasks.update { list ->
-            list.map { task ->
-                if (task.id == taskId) {
-                    task.copy(
-                        status = DownloadStatus.QUEUED,
-                        errorMessage = null,
-                        downloadedBytes = 0L,
-                        speedBytesPerSec = 0L
-                    )
-                } else task
-            }
-        }
-
-        DownloadForegroundService.start(appContext)
-        processNextInQueue()
-    }
-
-    fun removeTask(taskId: String) {
-        cancelTask(taskId)
-        _tasks.update { list -> list.filter { it.id != taskId } }
-    }
-
-    fun clearCompletedTasks() {
-        _tasks.update { list ->
-            list.filter { it.status != DownloadStatus.COMPLETED && it.status != DownloadStatus.CANCELED }
+        val maxRunning = settings.current.maxConcurrentDownloads.coerceIn(1, 5)
+        for (task in queued) {
+            if (jobs.size >= maxRunning) break
+            update(task.id) { it.copy(status = DownloadStatus.CONNECTING, errorMessage = null) }
+            launchJob(task.id)
         }
     }
 
-    @Synchronized
-    fun processNextInQueue() {
-        val treeUri = storageHelper.getSavedFolderUri() ?: return
+    private fun launchJob(taskId: String) {
+        val job = scope.launch(start = CoroutineStart.LAZY) { runTask(taskId) }
+        jobs[taskId] = job
+        job.invokeOnCompletion {
+            jobs.remove(taskId, job)
+            schedule()
+        }
+        job.start()
+    }
 
-        val currentDownloading = _tasks.value.count { it.status == DownloadStatus.DOWNLOADING || it.status == DownloadStatus.CONNECTING }
-        if (currentDownloading >= MAX_CONCURRENT_DOWNLOADS) return
-
-        val nextTask = _tasks.value.firstOrNull { it.status == DownloadStatus.QUEUED } ?: run {
-            checkAndStopServiceIfIdle()
+    private suspend fun runTask(taskId: String) {
+        val task = find(taskId) ?: return
+        val downloader = downloaders[task.source]
+        if (downloader == null) {
+            markFailed(taskId, "Unsupported download type")
             return
         }
 
-        startTaskExecution(nextTask, treeUri)
-    }
-
-    private fun startTaskExecution(task: DownloadTask, treeUri: Uri) {
-        val job = engineScope.launch {
-            updateTaskStatus(task.id, DownloadStatus.CONNECTING)
-
-            val targetDoc = storageHelper.getOrCreateTargetFile(
-                treeUri = treeUri,
-                subFolderName = task.subFolder,
-                fileName = task.fileName,
-                overwrite = true
-            )
-
-            if (targetDoc == null) {
-                updateTaskFailed(task.id, "Unable to create target file in chosen storage folder.")
-                processNextInQueue()
-                return@launch
+        val reporter = object : ProgressReporter {
+            override fun onFileCreated(outputUri: String, fileName: String) {
+                update(taskId, persist = true) {
+                    if (it.isActive) it.copy(outputUri = outputUri, fileName = fileName, status = DownloadStatus.DOWNLOADING) else it
+                }
             }
 
-            val outStream = storageHelper.openOutputStream(targetDoc, append = false)
-            if (outStream == null) {
-                updateTaskFailed(task.id, "Unable to open write stream to file.")
-                processNextInQueue()
-                return@launch
-            }
-
-            updateTaskStatus(task.id, DownloadStatus.DOWNLOADING, outputUri = targetDoc.uri.toString())
-
-            val downloadResult = if (task.protocol == ServerProtocol.FTP) {
-                ftpManager.downloadFile(
-                    config = FtpServerConfig.SAMONLINE_FTP,
-                    remoteFilePath = task.remotePathOrUrl,
-                    outputStream = outStream,
-                    totalBytesHint = task.totalBytes,
-                    onProgress = { downloaded, total, speed ->
-                        updateTaskProgress(task.id, downloaded, total, speed)
-                    },
-                    isCancelled = {
-                        val currentStatus = _tasks.value.find { it.id == task.id }?.status
-                        currentStatus == DownloadStatus.CANCELED
-                    }
-                )
-            } else {
-                httpMediaManager.downloadHttp(
-                    url = task.remotePathOrUrl,
-                    outputStream = outStream,
-                    offsetBytes = 0L,
-                    onProgress = { downloaded, total, speed ->
-                        updateTaskProgress(task.id, downloaded, total, speed)
-                    },
-                    isCancelled = {
-                        val currentStatus = _tasks.value.find { it.id == task.id }?.status
-                        currentStatus == DownloadStatus.CANCELED
-                    }
-                )
-            }
-
-            try {
-                outStream.close()
-            } catch (_: Exception) {}
-
-            downloadResult.fold(
-                onSuccess = {
-                    updateTaskStatus(task.id, DownloadStatus.COMPLETED)
-                },
-                onFailure = { err ->
-                    val isCancelled = err is CancellationException ||
-                            _tasks.value.find { it.id == task.id }?.status == DownloadStatus.CANCELED
-                    if (isCancelled) {
-                        updateTaskStatus(task.id, DownloadStatus.CANCELED)
+            override fun onProgress(downloaded: Long, total: Long, speedBytesPerSec: Long, etaSeconds: Long) {
+                update(taskId) {
+                    if (it.isRunning) {
+                        it.copy(
+                            status = DownloadStatus.DOWNLOADING,
+                            downloadedBytes = downloaded,
+                            totalBytes = if (total > 0) total else it.totalBytes,
+                            speedBytesPerSec = speedBytesPerSec,
+                            etaSeconds = etaSeconds
+                        )
                     } else {
-                        updateTaskFailed(task.id, err.localizedMessage ?: "Download failed")
+                        it
                     }
                 }
-            )
-
-            activeJobs.remove(task.id)
-            processNextInQueue()
+            }
         }
 
-        activeJobs[task.id] = job
+        try {
+            val outcome = downloader.download(task, reporter)
+            update(taskId, persist = true) {
+                if (!it.isRunning) return@update it
+                it.copy(
+                    status = DownloadStatus.COMPLETED,
+                    outputUri = outcome.outputUri,
+                    fileName = outcome.fileName,
+                    downloadedBytes = outcome.sizeBytes,
+                    totalBytes = outcome.sizeBytes,
+                    speedBytesPerSec = 0L,
+                    etaSeconds = -1L,
+                    errorMessage = null,
+                    completedAt = System.currentTimeMillis()
+                )
+            }
+        } catch (e: CancellationException) {
+            // Paused or cancelled by the user; the status was already set.
+            throw e
+        } catch (e: Throwable) {
+            markFailed(taskId, ErrorMessages.friendly(e))
+        }
     }
 
-    private fun updateTaskStatus(taskId: String, status: DownloadStatus, outputUri: String? = null) {
-        _tasks.update { list ->
-            list.map { task ->
-                if (task.id == taskId) {
-                    task.copy(
-                        status = status,
-                        outputUri = outputUri ?: task.outputUri,
-                        speedBytesPerSec = if (status == DownloadStatus.COMPLETED || status == DownloadStatus.CANCELED || status == DownloadStatus.FAILED) 0L else task.speedBytesPerSec
-                    )
-                } else task
+    // endregion
+
+    // region State + persistence
+
+    private suspend fun restoreSavedTasks() {
+        val saved = runCatching { dao.getAll() }.getOrDefault(emptyList())
+        // Anything that was running when the app closed becomes "paused" so the user can resume it.
+        val restored = saved.map {
+            if (it.isActive) it.copy(status = DownloadStatus.PAUSED, speedBytesPerSec = 0L, etaSeconds = -1L) else it
+        }
+        _tasks.update { current -> restored.filter { s -> current.none { it.id == s.id } } + current }
+        val changed = restored.filterIndexed { index, task -> task != saved[index] }
+        if (changed.isNotEmpty()) runCatching { dao.upsertAll(changed) }
+    }
+
+    private fun find(taskId: String): DownloadTask? = _tasks.value.firstOrNull { it.id == taskId }
+
+    private fun update(taskId: String, persist: Boolean = false, transform: (DownloadTask) -> DownloadTask) {
+        _tasks.update { list -> list.map { if (it.id == taskId) transform(it) else it } }
+        if (persist) persist(taskId)
+    }
+
+    /** Saves the latest version of a task. Writes run one at a time, in order. */
+    private fun persist(taskId: String) {
+        scope.launch(dbDispatcher) {
+            find(taskId)?.let { runCatching { dao.upsert(it) } }
+        }
+    }
+
+    private fun markFailed(taskId: String, message: String) {
+        update(taskId, persist = true) {
+            // Don't overwrite a pause/cancel the user made while the download was stopping.
+            if (it.isRunning) {
+                it.copy(status = DownloadStatus.FAILED, errorMessage = message, speedBytesPerSec = 0L, etaSeconds = -1L)
+            } else {
+                it
             }
         }
     }
 
-    private fun updateTaskProgress(taskId: String, downloaded: Long, total: Long, speed: Long) {
-        _tasks.update { list ->
-            list.map { task ->
-                if (task.id == taskId) {
-                    task.copy(
-                        downloadedBytes = downloaded,
-                        totalBytes = if (total > 0) total else task.totalBytes,
-                        speedBytesPerSec = speed,
-                        status = DownloadStatus.DOWNLOADING
-                    )
-                } else task
-            }
-        }
-    }
-
-    private fun updateTaskFailed(taskId: String, error: String) {
-        _tasks.update { list ->
-            list.map { task ->
-                if (task.id == taskId) {
-                    task.copy(
-                        status = DownloadStatus.FAILED,
-                        errorMessage = error,
-                        speedBytesPerSec = 0L
-                    )
-                } else task
-            }
-        }
-    }
-
-    private fun checkAndStopServiceIfIdle() {
-        val hasActive = _tasks.value.any { it.isActive }
-        if (!hasActive) {
-            DownloadForegroundService.stop(appContext)
-        }
-    }
+    // endregion
 }

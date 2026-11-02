@@ -2,13 +2,12 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import com.example.data.download.DownloadEngine
+import com.example.data.model.DownloadSource
 import com.example.data.model.DownloadStatus
 import com.example.data.model.DownloadTask
-import com.example.data.model.ServerProtocol
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -26,29 +25,28 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `download engine enqueues and cancels tasks`() {
+  fun `download engine enqueues cancels and removes tasks`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
-    val engine = DownloadEngine.getInstance(context)
-    assertNotNull(engine)
+    val engine = context.appContainer.downloadEngine
 
     val task = DownloadTask(
         id = "test-task-1",
         fileName = "test_episode_01.mkv",
-        remotePathOrUrl = "http://example.com/media.mkv",
-        protocol = ServerProtocol.HTTP_WEB,
+        sourceUrl = "http://example.com/media.mkv",
+        source = DownloadSource.HTTP,
         totalBytes = 1048576L
     )
 
-    engine.enqueueTasks(listOf(task))
+    engine.enqueue(listOf(task))
     val found = engine.tasks.value.find { it.id == "test-task-1" }
     assertNotNull(found)
+    // No download folder has been chosen in this test, so the task cannot start.
+    assertEquals(DownloadStatus.FAILED, found?.status)
 
-    engine.cancelTask("test-task-1")
-    val canceled = engine.tasks.value.find { it.id == "test-task-1" }
-    assertEquals(DownloadStatus.CANCELED, canceled?.status)
+    engine.cancel("test-task-1")
+    assertEquals(DownloadStatus.CANCELED, engine.tasks.value.find { it.id == "test-task-1" }?.status)
 
-    engine.removeTask("test-task-1")
-    val removed = engine.tasks.value.find { it.id == "test-task-1" }
-    assertEquals(null, removed)
+    engine.remove("test-task-1")
+    assertNull(engine.tasks.value.find { it.id == "test-task-1" })
   }
 }

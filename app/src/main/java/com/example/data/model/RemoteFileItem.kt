@@ -1,7 +1,9 @@
 package com.example.data.model
 
+import com.example.data.util.Formatters
 import java.util.Locale
 
+/** A file or folder listed by an FTP server or an HTTP directory page. */
 data class RemoteFileItem(
     val name: String,
     val path: String,
@@ -14,39 +16,33 @@ data class RemoteFileItem(
         get() = if (isDirectory) "" else name.substringAfterLast('.', "").lowercase(Locale.ROOT)
 
     val isVideo: Boolean
-        get() = extension in setOf("mkv", "mp4", "avi", "mov", "wmv", "webm", "flv", "ts", "m4v")
+        get() = extension in VIDEO_EXTENSIONS
+
+    val isAudio: Boolean
+        get() = extension in AUDIO_EXTENSIONS
 
     val isArchive: Boolean
-        get() = extension in setOf("zip", "rar", "7z", "tar", "gz", "iso")
+        get() = extension in ARCHIVE_EXTENSIONS
 
     val isDocument: Boolean
-        get() = extension in setOf("pdf", "epub", "doc", "docx", "txt")
+        get() = extension in DOCUMENT_EXTENSIONS
 
     val formattedSize: String
-        get() = formatBytes(sizeBytes)
+        get() = Formatters.bytes(sizeBytes)
 
+    /** Episode number from names like "S01E05", "E05" or "Episode 5"; used to sort seasons. */
     val episodeNumber: Int
         get() {
             val match = Regex("""S\d+E(\d+)""", RegexOption.IGNORE_CASE).find(name)
                 ?: Regex("""E(\d+)""", RegexOption.IGNORE_CASE).find(name)
                 ?: Regex("""Episode\s*(\d+)""", RegexOption.IGNORE_CASE).find(name)
-            return match?.groupValues?.get(1)?.toIntOrNull() ?: 999999
+            return match?.groupValues?.get(1)?.toIntOrNull() ?: Int.MAX_VALUE
         }
 
     companion object {
-        fun formatBytes(bytes: Long): String {
-            if (bytes <= 0) return "0 B"
-            if (bytes < 1024) return "$bytes B"
-            val kb = bytes / 1024.0
-            if (kb < 1024) return String.format(Locale.US, "%.1f KB", kb)
-            val mb = kb / 1024.0
-            if (mb < 1024) return String.format(Locale.US, "%.1f MB", mb)
-            val gb = mb / 1024.0
-            return String.format(Locale.US, "%.2f GB", gb)
-        }
-
-        fun formatSpeed(bytesPerSec: Long): String {
-            return "${formatBytes(bytesPerSec)}/s"
-        }
+        val VIDEO_EXTENSIONS = setOf("mkv", "mp4", "avi", "mov", "wmv", "webm", "flv", "ts", "m4v", "3gp")
+        val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "flac", "wav", "ogg", "opus")
+        val ARCHIVE_EXTENSIONS = setOf("zip", "rar", "7z", "tar", "gz", "iso")
+        val DOCUMENT_EXTENSIONS = setOf("pdf", "epub", "doc", "docx", "txt", "srt", "sub")
     }
 }

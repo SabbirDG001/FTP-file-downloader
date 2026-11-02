@@ -1,0 +1,64 @@
+# Builds the app on GitHub's computers (no Android Studio needed) and publishes the
+# APK on the repository's "Releases" page as "Latest test build", so it can be
+# downloaded and installed straight from a phone.
+name: Build APK
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Build the app
+        run: gradle assembleDebug
+
+      - name: Give the APKs friendly names
+        run: |
+          mkdir -p out
+          cd app/build/outputs/apk/debug
+          cp app-arm64-v8a-debug.apk   "$GITHUB_WORKSPACE/out/MediaDownloader-most-phones.apk"
+          cp app-armeabi-v7a-debug.apk "$GITHUB_WORKSPACE/out/MediaDownloader-older-phones.apk"
+          cp app-universal-debug.apk   "$GITHUB_WORKSPACE/out/MediaDownloader-any-phone.apk"
+          ls -la "$GITHUB_WORKSPACE/out"
+
+      - name: Keep the APKs with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaDownloader-apks
+          path: out/*.apk
+
+      - name: Publish as "Latest test build" on the Releases page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest-build --cleanup-tag --yes || true
+          gh release create latest-build out/*.apk \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Latest test build (${GITHUB_REF_NAME})" \
+            --notes "Built automatically from branch ${GITHUB_REF_NAME}, commit ${GITHUB_SHA::7}. Most phones: download MediaDownloader-most-phones.apk. If it won't install, use MediaDownloader-any-phone.apk."
+
+      - name: Run unit tests
+        run: gradle testDebugUnitTest
