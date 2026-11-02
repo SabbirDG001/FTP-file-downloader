@@ -14,12 +14,12 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -194,57 +194,130 @@ private fun ErrorContent(state: MediaSheetState.Error, actions: MediaSheetAction
     }
 }
 
+/**
+ * Everything in [content] scrolls; [button] stays pinned at the bottom at full size,
+ * however long the list is (it used to get squashed on long playlists).
+ */
+@Composable
+private fun ScrollingWithPinnedButton(
+    content: LazyListScope.() -> Unit,
+    button: @Composable () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(bottom = 4.dp),
+            content = content
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        button()
+    }
+}
+
 @Composable
 private fun VideoContent(state: MediaSheetState.Ready, actions: MediaSheetActions) {
     val info = state.info
-    MediaHeader(info.title, info.uploader, info.thumbnailUrl, info.durationSeconds, info.platform)
-
-    if (info.playlistUrl != null) {
-        Spacer(modifier = Modifier.height(10.dp))
-        OutlinedButton(
-            onClick = actions.onOpenWholePlaylist,
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("open_whole_playlist_button")
-        ) {
-            Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("This video is in a playlist — choose videos from it")
-        }
-    }
-    Spacer(modifier = Modifier.height(12.dp))
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 360.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        contentPadding = PaddingValues(vertical = 4.dp)
-    ) {
-        if (info.videoOptions.isNotEmpty()) {
-            item { SectionLabel("VIDEO") }
-            items(info.videoOptions, key = { it.id }) { option ->
-                OptionRow(option, selected = option.id == state.selectedOptionId, onClick = { actions.onSelectOption(option.id) })
+    ScrollingWithPinnedButton(
+        content = {
+            item {
+                MediaHeader(info.title, info.uploader, info.thumbnailUrl, info.durationSeconds, info.platform)
             }
-        }
-        if (info.audioOptions.isNotEmpty()) {
-            item { SectionLabel("AUDIO ONLY") }
-            items(info.audioOptions, key = { it.id }) { option ->
-                OptionRow(option, selected = option.id == state.selectedOptionId, onClick = { actions.onSelectOption(option.id) })
+            if (info.playlistUrl != null) {
+                item {
+                    OutlinedButton(
+                        onClick = actions.onOpenWholePlaylist,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                            .testTag("open_whole_playlist_button")
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("This video is in a playlist — choose videos from it")
+                    }
+                }
             }
+            if (info.videoOptions.isNotEmpty()) {
+                item { SectionLabel("VIDEO") }
+                items(info.videoOptions, key = { it.id }) { option ->
+                    OptionRow(option, selected = option.id == state.selectedOptionId, onClick = { actions.onSelectOption(option.id) })
+                }
+            }
+            if (info.audioOptions.isNotEmpty()) {
+                item { SectionLabel("AUDIO ONLY") }
+                items(info.audioOptions, key = { it.id }) { option ->
+                    OptionRow(option, selected = option.id == state.selectedOptionId, onClick = { actions.onSelectOption(option.id) })
+                }
+            }
+        },
+        button = {
+            DownloadButton(
+                label = state.selectedOption?.let { "Download ${it.label}" } ?: "Download",
+                enabled = state.selectedOption != null,
+                onClick = actions.onDownload
+            )
         }
-    }
-
-    Spacer(modifier = Modifier.height(12.dp))
-    DownloadButton(
-        label = state.selectedOption?.let { "Download ${it.label}" } ?: "Download",
-        enabled = state.selectedOption != null,
-        onClick = actions.onDownload
     )
 }
 
 @Composable
 private fun PlaylistContent(state: MediaSheetState.Playlist, actions: MediaSheetActions) {
+    val info = state.info
+    val count = state.selectedIds.size
+    ScrollingWithPinnedButton(
+        content = {
+            item { PlaylistHeader(state) }
+            item { PlaylistQualityPicker(state, actions) }
+            item { Column { SaveToSection(state, actions) } }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "$count of ${info.entries.size} selected",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = actions.onSelectAll) { Text("Select all") }
+                    TextButton(onClick = actions.onSelectNone) { Text("None") }
+                }
+            }
+            if (info.entries.isEmpty()) {
+                item {
+                    Text(
+                        text = "No downloadable videos were found in this playlist.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                }
+            }
+            itemsIndexed(info.entries, key = { _, entry -> entry.id }) { index, entry ->
+                PlaylistRow(
+                    index = index + 1,
+                    entry = entry,
+                    checked = entry.id in state.selectedIds,
+                    onToggle = { actions.onToggleEntry(entry.id) }
+                )
+            }
+        },
+        button = {
+            DownloadButton(
+                label = when (count) {
+                    0 -> "Tick videos to download"
+                    1 -> "Download 1 video • ${state.selectedOption?.label.orEmpty()}"
+                    else -> "Download $count videos • ${state.selectedOption?.label.orEmpty()}"
+                },
+                enabled = count > 0 && state.selectedOption != null,
+                onClick = actions.onDownload
+            )
+        }
+    )
+}
+
+@Composable
+private fun PlaylistHeader(state: MediaSheetState.Playlist) {
     val info = state.info
     Row(verticalAlignment = Alignment.CenterVertically) {
         PlatformBadge(info.platform, size = 36.dp)
@@ -266,80 +339,33 @@ private fun PlaylistContent(state: MediaSheetState.Playlist, actions: MediaSheet
             )
         }
     }
+}
 
-    Spacer(modifier = Modifier.height(12.dp))
-    SectionLabel("QUALITY FOR ALL VIDEOS")
-    Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        state.options.forEach { option ->
-            FilterChip(
-                selected = option.id == state.selectedOptionId,
-                onClick = { actions.onSelectOption(option.id) },
-                label = { Text(option.label) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = if (option.kind == MediaKind.AUDIO) Icons.Default.MusicNote else Icons.Default.Videocam,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                },
-                modifier = Modifier.testTag("playlist_quality_${option.id}")
-            )
-        }
-    }
-
-    Spacer(modifier = Modifier.height(4.dp))
-    SaveToSection(state, actions)
-
-    Spacer(modifier = Modifier.height(4.dp))
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "${state.selectedIds.size} of ${info.entries.size} selected",
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.weight(1f)
-        )
-        TextButton(onClick = actions.onSelectAll) { Text("Select all") }
-        TextButton(onClick = actions.onSelectNone) { Text("None") }
-    }
-
-    if (info.entries.isEmpty()) {
-        Text(
-            text = "No downloadable videos were found in this playlist.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 16.dp)
-        )
-    } else {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 380.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+@Composable
+private fun PlaylistQualityPicker(state: MediaSheetState.Playlist, actions: MediaSheetActions) {
+    Column {
+        SectionLabel("QUALITY FOR ALL VIDEOS")
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            itemsIndexed(info.entries, key = { _, entry -> entry.id }) { index, entry ->
-                PlaylistRow(
-                    index = index + 1,
-                    entry = entry,
-                    checked = entry.id in state.selectedIds,
-                    onToggle = { actions.onToggleEntry(entry.id) }
+            state.options.forEach { option ->
+                FilterChip(
+                    selected = option.id == state.selectedOptionId,
+                    onClick = { actions.onSelectOption(option.id) },
+                    label = { Text(option.label) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (option.kind == MediaKind.AUDIO) Icons.Default.MusicNote else Icons.Default.Videocam,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    },
+                    modifier = Modifier.testTag("playlist_quality_${option.id}")
                 )
             }
         }
     }
-
-    Spacer(modifier = Modifier.height(12.dp))
-    val count = state.selectedIds.size
-    DownloadButton(
-        label = when (count) {
-            0 -> "Tick videos to download"
-            1 -> "Download 1 video • ${state.selectedOption?.label.orEmpty()}"
-            else -> "Download $count videos • ${state.selectedOption?.label.orEmpty()}"
-        },
-        enabled = count > 0 && state.selectedOption != null,
-        onClick = actions.onDownload
-    )
 }
 
 /** Where the playlist is saved: a new folder (name it) or any folder picked on the phone. */
