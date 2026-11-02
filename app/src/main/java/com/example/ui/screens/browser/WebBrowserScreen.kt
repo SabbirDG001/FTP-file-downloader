@@ -121,7 +121,7 @@ class BrowserController {
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView, newProgress: Int) {
-                    progress = newProgress
+                    this@BrowserController.progress = newProgress
                 }
             }
             webView = this

@@ -32,7 +32,7 @@ jobs:
           gradle-version: "9.3.1"
 
       - name: Build the app
-        run: gradle assembleDebug --stacktrace
+        run: gradle assembleDebug
 
       - name: Give the APKs friendly names
         run: |
@@ -61,4 +61,4 @@ jobs:
             --notes "Built automatically from branch ${GITHUB_REF_NAME}, commit ${GITHUB_SHA::7}. Most phones: download MediaDownloader-most-phones.apk. If it won't install, use MediaDownloader-any-phone.apk."
 
       - name: Run unit tests
-        run: gradle testDebugUnitTest --stacktrace
+        run: gradle testDebugUnitTest
