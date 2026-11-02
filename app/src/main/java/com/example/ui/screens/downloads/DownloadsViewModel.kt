@@ -58,7 +58,34 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
         if (!storage.shareFile(uri, task.fileName)) _messages.tryEmit("Unable to share this file")
     }
 
+    /** A titled part of the downloads list. */
+    data class Group(val title: String, val tasks: List<DownloadTask>)
+
     companion object {
+        /**
+         * Downloading (running first, then waiting, then paused, in queue order) at the top,
+         * finished downloads (newest first) below, failed / cancelled at the bottom.
+         */
+        fun groupForDisplay(tasks: List<DownloadTask>): List<Group> {
+            val inProgressOrder = listOf(
+                DownloadStatus.DOWNLOADING, DownloadStatus.CONNECTING, DownloadStatus.QUEUED, DownloadStatus.PAUSED
+            )
+            val downloading = tasks
+                .filter { it.status in inProgressOrder }
+                .sortedWith(compareBy<DownloadTask> { inProgressOrder.indexOf(it.status) }.thenBy { it.createdAt })
+            val downloaded = tasks
+                .filter { it.status == DownloadStatus.COMPLETED }
+                .sortedByDescending { maxOf(it.completedAt, it.createdAt) }
+            val failed = tasks
+                .filter { it.status == DownloadStatus.FAILED || it.status == DownloadStatus.CANCELED }
+                .sortedByDescending { it.createdAt }
+            return listOf(
+                Group("Downloading", downloading),
+                Group("Downloaded", downloaded),
+                Group("Failed / cancelled", failed)
+            ).filter { it.tasks.isNotEmpty() }
+        }
+
         fun matches(task: DownloadTask, filter: DownloadFilter): Boolean = when (filter) {
             DownloadFilter.ALL -> true
             DownloadFilter.ACTIVE -> task.status in setOf(

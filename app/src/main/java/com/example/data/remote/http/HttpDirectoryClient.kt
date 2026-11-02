@@ -1,5 +1,6 @@
 package com.example.data.remote.http
 
+import com.example.data.download.SpeedLimiter
 import com.example.data.model.RemoteFileItem
 import com.example.data.remote.ftp.copyWithProgress
 import kotlinx.coroutines.Dispatchers
@@ -94,7 +95,8 @@ class HttpDirectoryClient {
         url: String,
         resumeFrom: Long,
         openOutput: (append: Boolean) -> OutputStream,
-        onProgress: (downloaded: Long, total: Long, speedBytesPerSec: Long) -> Unit
+        onProgress: (downloaded: Long, total: Long, speedBytesPerSec: Long) -> Unit,
+        limiter: SpeedLimiter? = null
     ): Long = withContext(Dispatchers.IO) {
         val requestBuilder = Request.Builder()
             .url(url)
@@ -118,7 +120,7 @@ class HttpDirectoryClient {
 
             val written = openOutput(resumed).use { out ->
                 body.byteStream().use { input ->
-                    copyWithProgress(input, out, offset, total, onProgress)
+                    copyWithProgress(input, out, offset, total, onProgress, limiter)
                 }
             }
             onProgress(written, maxOf(total, written), 0L)

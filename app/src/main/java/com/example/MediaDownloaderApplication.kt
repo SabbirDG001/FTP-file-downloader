@@ -7,6 +7,7 @@ import com.example.data.download.DownloadEngine
 import com.example.data.download.FtpDownloader
 import com.example.data.download.HttpDownloader
 import com.example.data.download.SocialDownloader
+import com.example.data.download.SpeedLimiter
 import com.example.data.local.AppDatabase
 import com.example.data.model.DownloadSource
 import com.example.data.remote.ftp.FtpClientManager
@@ -30,14 +31,17 @@ class AppContainer(context: Context) {
     val cookieExporter = BrowserCookieExporter(context)
     val quickPreview = com.example.data.remote.social.QuickPreview()
 
+    /** One limiter shared by all FTP/HTTP downloads so the total stays under the limit. */
+    private val speedLimiter = SpeedLimiter({ settings.current.speedLimitKbps * 1024L })
+
     val downloadEngine = DownloadEngine(
         appContext = context,
         dao = database.downloadDao(),
         storage = storage,
         settings = settings,
         downloaders = mapOf(
-            DownloadSource.FTP to FtpDownloader(storage, FtpClientManager()),
-            DownloadSource.HTTP to HttpDownloader(storage, httpClient),
+            DownloadSource.FTP to FtpDownloader(storage, FtpClientManager(), speedLimiter),
+            DownloadSource.HTTP to HttpDownloader(storage, httpClient, speedLimiter),
             DownloadSource.SOCIAL to SocialDownloader(context, ytDlp, storage, cookieExporter, settings)
         )
     )

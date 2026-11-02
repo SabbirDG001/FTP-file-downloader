@@ -139,6 +139,7 @@ class YtDlpManager(private val context: Context) {
             addOption("--no-mtime")
             addOption("--continue")
             addOption("--concurrent-fragments", 4)
+            if (option.rateLimitBytesPerSec > 0) addOption("--limit-rate", option.rateLimitBytesPerSec)
             addOption("-f", option.formatSelector.ifBlank { "bv*+ba/b" })
             if (option.kind == MediaKind.AUDIO) {
                 addOption("-x")
@@ -189,5 +190,7 @@ class YtDlpManager(private val context: Context) {
 data class DownloadRequestOptions(
     val formatSelector: String,
     val kind: MediaKind,
-    val audioFormat: String
+    val audioFormat: String,
+    /** Max speed for this download in bytes/second; 0 = no limit. */
+    val rateLimitBytesPerSec: Long = 0L
 )

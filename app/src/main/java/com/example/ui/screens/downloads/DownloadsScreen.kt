@@ -43,6 +43,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -102,8 +103,8 @@ fun DownloadsScreen(
     modifier: Modifier = Modifier
 ) {
     var pendingDelete by remember { mutableStateOf<DownloadTask?>(null) }
-    // Newest first.
-    val visible = tasks.filter { DownloadsViewModel.matches(it, filter) }.asReversed()
+    val visible = tasks.filter { DownloadsViewModel.matches(it, filter) }
+    val groups = DownloadsViewModel.groupForDisplay(visible)
     val anyActive = tasks.any { it.isActive }
     val anyPaused = tasks.any { it.status == DownloadStatus.PAUSED }
     val anyFinished = tasks.any { it.status == DownloadStatus.COMPLETED || it.status == DownloadStatus.CANCELED }
@@ -165,19 +166,24 @@ fun DownloadsScreen(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(visible, key = { it.id }) { task ->
-                    DownloadCard(
-                        task = task,
-                        onPause = { onPause(task.id) },
-                        onResume = { onResume(task.id) },
-                        onRetry = { onRetry(task.id) },
-                        onCancel = { onCancel(task.id) },
-                        onDelete = {
-                            if (task.status == DownloadStatus.COMPLETED) pendingDelete = task else onRemove(task.id, false)
-                        },
-                        onOpen = { onOpen(task) },
-                        onShare = { onShare(task) }
-                    )
+                groups.forEach { group ->
+                    item(key = "header_${group.title}") {
+                        SectionHeader(group.title, group.tasks.size)
+                    }
+                    items(group.tasks, key = { it.id }) { task ->
+                        DownloadCard(
+                            task = task,
+                            onPause = { onPause(task.id) },
+                            onResume = { onResume(task.id) },
+                            onRetry = { onRetry(task.id) },
+                            onCancel = { onCancel(task.id) },
+                            onDelete = {
+                                if (task.status == DownloadStatus.COMPLETED) pendingDelete = task else onRemove(task.id, false)
+                            },
+                            onOpen = { onOpen(task) },
+                            onShare = { onShare(task) }
+                        )
+                    }
                 }
             }
         }
@@ -209,6 +215,20 @@ fun DownloadsScreen(
             },
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } }
         )
+    }
+}
+
+/** "DOWNLOADING (3)" / "DOWNLOADED (12)" heading with a line under it. */
+@Composable
+private fun SectionHeader(title: String, count: Int) {
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        Text(
+            text = "${title.uppercase()} ($count)",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
     }
 }
 

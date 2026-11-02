@@ -22,6 +22,8 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
@@ -51,6 +53,10 @@ class DownloadEngine(
 
     init {
         scope.launch(dbDispatcher) { restoreSavedTasks() }
+        // When "downloads at the same time" is raised, start waiting downloads right away.
+        scope.launch {
+            settings.settings.map { it.maxConcurrentDownloads }.distinctUntilChanged().collect { schedule() }
+        }
     }
 
     // region Public actions

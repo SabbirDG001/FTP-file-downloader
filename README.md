@@ -16,10 +16,10 @@ An Android app (Kotlin + Jetpack Compose) for downloading:
 | Share to app | In YouTube / Facebook / Instagram tap **Share → MediaDL**. |
 | Browser | Built-in browser with shortcuts to each site and a **Download** button for the page you're on. Logging in here lets the app download private posts you can see (cookies stay on the device). |
 | Servers | FTP / web-directory browser (server settings are saved) and the Direct link / Season downloader. |
-| Downloads | Live progress, speed and time left; pause, resume, cancel, retry; open, share or delete finished files; filters. History is saved and survives restarts. |
+| Downloads | "Downloading" on top, "Downloaded" below. Live progress, speed and time left; pause, resume, cancel, retry; open, share or delete finished files; filters. History is saved and survives restarts. |
 | Background | Downloads continue when the app is closed, with a progress notification (Pause all / Cancel all) and a notification when each file finishes. |
 | Accounts | Settings → Accounts shows which sites you're logged into, with a Log in button for each. |
-| Settings | Download folder, how many downloads run at once, preferred video quality and audio format, per-site sub folders, clipboard detection, yt-dlp updates, browser login. |
+| Settings | Download folder, how many downloads run at once, a total speed limit, preferred video quality and audio format, per-site sub folders, clipboard detection, yt-dlp updates, browser login. |
 
 ## Project layout
 
