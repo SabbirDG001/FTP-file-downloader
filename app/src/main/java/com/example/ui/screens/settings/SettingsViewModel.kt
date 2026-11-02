@@ -6,7 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.appContainer
 import com.example.data.remote.social.EngineState
 import com.example.data.settings.AppSettings
+import com.example.data.model.Platform
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -19,6 +22,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val settings: StateFlow<AppSettings> = container.settings.settings
     val folderName: StateFlow<String> = container.storage.folderName
     val engineState: StateFlow<EngineState> = container.ytDlp.state
+
+    private val _loginStatus = MutableStateFlow<Map<Platform, Boolean>>(emptyMap())
+    /** Which sites are logged in inside the built-in browser. */
+    val loginStatus: StateFlow<Map<Platform, Boolean>> = _loginStatus.asStateFlow()
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
@@ -41,9 +48,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun refreshLoginStatus() {
+        viewModelScope.launch { _loginStatus.value = container.cookieExporter.loginStatus() }
+    }
+
     fun clearBrowserLogin() {
         viewModelScope.launch {
             container.cookieExporter.clear()
+            refreshLoginStatus()
             _messages.tryEmit("Logged out of all sites in the built-in browser")
         }
     }

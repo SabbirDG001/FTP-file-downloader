@@ -38,6 +38,10 @@ import com.example.BuildConfig
 import com.example.data.remote.social.EngineState
 import com.example.data.settings.AppSettings
 import com.example.ui.theme.StatusError
+import com.example.ui.theme.StatusSuccess
+import com.example.ui.components.PlatformBadge
+import com.example.data.model.Platform
+import com.example.data.remote.social.BrowserCookieExporter
 
 @Composable
 fun SettingsScreen(
@@ -49,6 +53,8 @@ fun SettingsScreen(
     onPrepareEngine: () -> Unit,
     onUpdateEngine: () -> Unit,
     onClearBrowserLogin: () -> Unit,
+    loginStatus: Map<Platform, Boolean>,
+    onLogin: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -108,6 +114,37 @@ fun SettingsScreen(
                 subtitle = "Offer to download a link you copied in another app",
                 checked = settings.detectClipboardLinks,
                 onChange = { value -> onUpdate { it.copy(detectClipboardLinks = value) } }
+            )
+        }
+
+        Section("Accounts") {
+            Text(
+                text = "Log in to download private posts and stories you can see. Logins stay on this phone.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            BrowserCookieExporter.LOGIN_SITES.forEach { (platform, site) ->
+                val loggedIn = loginStatus[platform] == true
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PlatformBadge(platform, size = 28.dp)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(platform.displayName, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+                        Text(
+                            text = if (loggedIn) "Logged in" else "Not logged in",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (loggedIn) StatusSuccess else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (!loggedIn) {
+                        OutlinedButton(onClick = { onLogin(site.loginUrl) }) { Text("Log in") }
+                    }
+                }
+            }
+            Text(
+                text = "Google may still refuse to log in inside apps. YouTube works without logging in for most videos.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 

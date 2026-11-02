@@ -104,6 +104,7 @@ dependencies {
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   implementation(libs.androidx.navigation.compose)
   implementation(libs.coil.compose)
+  implementation(libs.androidx.webkit)
 
   // Storage + download history
   implementation(libs.androidx.documentfile)
@@ -125,6 +126,8 @@ dependencies {
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
+  // Android's built-in org.json is only a stub in plain unit tests.
+  testImplementation(libs.org.json)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
   testImplementation(libs.roborazzi)

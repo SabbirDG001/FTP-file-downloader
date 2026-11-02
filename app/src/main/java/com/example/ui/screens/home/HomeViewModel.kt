@@ -4,15 +4,22 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.appContainer
-import com.example.data.util.ErrorMessages
 import com.example.data.model.DownloadSource
 import com.example.data.model.DownloadTask
+import com.example.data.model.FetchResult
 import com.example.data.model.FormatOption
 import com.example.data.model.MediaInfo
+import com.example.data.model.PlaylistInfo
+import com.example.data.remote.social.PreviewInfo
+import com.example.data.remote.social.YtDlpJsonParser
 import com.example.data.settings.AppSettings
 import com.example.data.storage.StorageHelper
+import com.example.data.util.ErrorMessages
 import com.example.data.util.LinkUtils
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -22,14 +29,29 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** The "pick a quality" bottom sheet. */
+/** The bottom sheet for a link: loading, error, one video, or a playlist. */
 sealed interface MediaSheetState {
     data object Hidden : MediaSheetState
-    data class Loading(val url: String) : MediaSheetState
-    data class Error(val url: String, val message: String) : MediaSheetState
+
+    /** [preview] appears after about a second, before the full details are ready. */
+    data class Loading(val url: String, val isPlaylist: Boolean, val preview: PreviewInfo? = null) : MediaSheetState
+
+    data class Error(val url: String, val message: String, val wholePlaylist: Boolean) : MediaSheetState
+
     data class Ready(val info: MediaInfo, val selectedOptionId: String) : MediaSheetState {
         val selectedOption: FormatOption?
             get() = info.options.firstOrNull { it.id == selectedOptionId }
+    }
+
+    /** A playlist: the user ticks the videos they want and picks one quality for all. */
+    data class Playlist(
+        val info: PlaylistInfo,
+        val selectedIds: Set<String>,
+        val options: List<FormatOption>,
+        val selectedOptionId: String
+    ) : MediaSheetState {
+        val selectedOption: FormatOption?
+            get() = options.firstOrNull { it.id == selectedOptionId }
     }
 }
 
@@ -41,9 +63,9 @@ data class HomeUiState(
 )
 
 /**
- * Social media downloads: paste / share / clipboard link -> read the post with yt-dlp
- * -> let the user pick a quality -> add it to the download queue. Shared by the Home
- * and Browser screens.
+ * Social media downloads: paste / share / clipboard link -> read it with yt-dlp ->
+ * pick a quality (and videos, for a playlist) -> add to the download queue.
+ * Shared by the Home and Browser screens.
  */
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -57,76 +79,176 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** Short messages for the snackbar. */
     val messages: SharedFlow<String> = _messages.asSharedFlow()
 
-    private var fetchJob: Job? = null
+    private var sheetJob: Job? = null
     private var lastOfferedClipboardLink: String? = null
+
+    /**
+     * Reads that are running or finished, by link. A copied link starts reading in the
+     * background straight away, so it's often ready by the time the user taps Download.
+     */
+    private val reads = object : LinkedHashMap<String, Deferred<FetchResult>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Deferred<FetchResult>>?) = size > 20
+    }
 
     fun onLinkChange(text: String) {
         _state.update { it.copy(linkInput = text) }
     }
 
-    /** Reads the post at [input] (or the text field) and opens the quality sheet. */
-    fun fetch(input: String = _state.value.linkInput) {
+    /** Reads the link at [input] (or the text field) and opens the sheet. */
+    fun fetch(input: String = _state.value.linkInput, wholePlaylist: Boolean = false) {
         val url = LinkUtils.normalize(input)
         if (!LinkUtils.isWebUrl(url)) {
             _messages.tryEmit("Paste a link that starts with http:// or https://")
             return
         }
-        _state.update { it.copy(linkInput = url, clipboardLink = null, sheet = MediaSheetState.Loading(url)) }
+        val isPlaylist = wholePlaylist || YtDlpJsonParser.isPlaylistOnlyUrl(url)
+        _state.update {
+            it.copy(linkInput = url, clipboardLink = null, sheet = MediaSheetState.Loading(url, isPlaylist))
+        }
 
-        fetchJob?.cancel()
-        fetchJob = viewModelScope.launch {
-            val cookies = if (settings.value.useBrowserLogin) container.cookieExporter.export() else null
-            val result = runCatching { container.ytDlp.fetchInfo(url, cookies) }
-            // Ignore the result if the user closed the sheet meanwhile.
+        sheetJob?.cancel()
+        sheetJob = viewModelScope.launch {
+            // Quick title + thumbnail while the full read runs.
+            launch {
+                val preview = container.quickPreview.fetch(url) ?: return@launch
+                _state.update { state ->
+                    val sheet = state.sheet
+                    if (sheet is MediaSheetState.Loading && sheet.url == url) state.copy(sheet = sheet.copy(preview = preview)) else state
+                }
+            }
+
+            val result = try {
+                Result.success(read(url, wholePlaylist).await())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                forget(url, wholePlaylist)
+                Result.failure(e)
+            }
+
             if (_state.value.sheet !is MediaSheetState.Loading) return@launch
             _state.update {
                 it.copy(
                     sheet = result.fold(
-                        onSuccess = { info -> MediaSheetState.Ready(info, defaultOption(info).id) },
-                        onFailure = { error -> MediaSheetState.Error(url, ErrorMessages.friendly(error)) }
+                        onSuccess = { fetched -> sheetFor(fetched) },
+                        onFailure = { error -> MediaSheetState.Error(url, ErrorMessages.friendly(error), wholePlaylist) }
                     )
                 )
             }
         }
     }
 
+    /** From a single video that belongs to a playlist: switch to choosing from the whole playlist. */
+    fun openWholePlaylist() {
+        val sheet = _state.value.sheet as? MediaSheetState.Ready ?: return
+        val playlistUrl = sheet.info.playlistUrl ?: return
+        fetch(playlistUrl, wholePlaylist = true)
+    }
+
+    fun retry() {
+        val sheet = _state.value.sheet as? MediaSheetState.Error ?: return
+        fetch(sheet.url, sheet.wholePlaylist)
+    }
+
     fun selectOption(optionId: String) {
         _state.update { state ->
-            val sheet = state.sheet
-            if (sheet is MediaSheetState.Ready) state.copy(sheet = sheet.copy(selectedOptionId = optionId)) else state
+            when (val sheet = state.sheet) {
+                is MediaSheetState.Ready -> state.copy(sheet = sheet.copy(selectedOptionId = optionId))
+                is MediaSheetState.Playlist -> state.copy(sheet = sheet.copy(selectedOptionId = optionId))
+                else -> state
+            }
         }
     }
 
+    // region Playlist selection
+
+    fun togglePlaylistEntry(id: String) = updatePlaylist { sheet ->
+        val selected = sheet.selectedIds.toMutableSet()
+        if (!selected.add(id)) selected.remove(id)
+        sheet.copy(selectedIds = selected)
+    }
+
+    fun selectAllPlaylistEntries() = updatePlaylist { it.copy(selectedIds = it.info.entries.map { e -> e.id }.toSet()) }
+
+    fun clearPlaylistSelection() = updatePlaylist { it.copy(selectedIds = emptySet()) }
+
+    private fun updatePlaylist(transform: (MediaSheetState.Playlist) -> MediaSheetState.Playlist) {
+        _state.update { state ->
+            val sheet = state.sheet
+            if (sheet is MediaSheetState.Playlist) state.copy(sheet = transform(sheet)) else state
+        }
+    }
+
+    // endregion
+
     fun dismissSheet() {
-        fetchJob?.cancel()
+        sheetJob?.cancel()
         _state.update { it.copy(sheet = MediaSheetState.Hidden) }
     }
 
-    /** Adds the selected quality to the download queue. */
+    /** Adds the chosen video (or the ticked playlist videos) to the download queue. */
     fun downloadSelected() {
-        val sheet = _state.value.sheet as? MediaSheetState.Ready ?: return
+        when (val sheet = _state.value.sheet) {
+            is MediaSheetState.Ready -> downloadVideo(sheet)
+            is MediaSheetState.Playlist -> downloadPlaylist(sheet)
+            else -> Unit
+        }
+    }
+
+    private fun downloadVideo(sheet: MediaSheetState.Ready) {
         val option = sheet.selectedOption ?: return
         val info = sheet.info
-        val currentSettings = settings.value
+        val folder = if (settings.value.platformSubfolders) info.platform.folderName else "Social Media"
+        container.downloadEngine.enqueue(
+            listOf(
+                socialTask(info.pageUrl, info.title, info.thumbnailUrl, info.platform, option, folder)
+            )
+        )
+        _state.update { it.copy(sheet = MediaSheetState.Hidden, linkInput = "") }
+        _messages.tryEmit("Download started: ${option.label}")
+    }
 
-        val baseName = StorageHelper.cleanFileName(info.title).take(100).ifBlank { "video" }
-        val task = DownloadTask(
+    private fun downloadPlaylist(sheet: MediaSheetState.Playlist) {
+        val option = sheet.selectedOption ?: return
+        val info = sheet.info
+        val chosen = info.entries.filter { it.id in sheet.selectedIds }
+        if (chosen.isEmpty()) {
+            _messages.tryEmit("Tick at least one video")
+            return
+        }
+        // Each playlist gets its own folder, e.g. "My Music Mix".
+        val folder = StorageHelper.cleanFileName(info.title).take(80).ifBlank { info.platform.folderName }
+        val tasks = chosen.map { entry ->
+            socialTask(entry.url, entry.title, entry.thumbnailUrl, info.platform, option, folder)
+        }
+        container.downloadEngine.enqueue(tasks)
+        _state.update { it.copy(sheet = MediaSheetState.Hidden, linkInput = "") }
+        _messages.tryEmit("${tasks.size} videos added (${option.label})")
+    }
+
+    private fun socialTask(
+        url: String,
+        title: String,
+        thumbnailUrl: String,
+        platform: com.example.data.model.Platform,
+        option: FormatOption,
+        folder: String
+    ): DownloadTask {
+        val baseName = StorageHelper.cleanFileName(title).take(100).ifBlank { "video" }
+        return DownloadTask(
             fileName = "$baseName.${option.extension}",
-            sourceUrl = info.pageUrl,
+            sourceUrl = url,
             source = DownloadSource.SOCIAL,
             totalBytes = option.estimatedBytes,
-            subFolder = if (currentSettings.platformSubfolders) info.platform.folderName else "Social Media",
-            title = info.title,
-            thumbnailUrl = info.thumbnailUrl,
-            platform = info.platform,
+            subFolder = folder,
+            title = title,
+            thumbnailUrl = thumbnailUrl,
+            platform = platform,
             formatSelector = option.selector,
             mediaKind = option.kind,
             audioFormat = option.audioFormat,
             qualityLabel = option.label
         )
-        container.downloadEngine.enqueue(listOf(task))
-        _state.update { it.copy(sheet = MediaSheetState.Hidden, linkInput = "") }
-        _messages.tryEmit("Download started: ${option.label}")
     }
 
     /** Called when the app gains focus with text on the clipboard. */
@@ -136,6 +258,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (link == lastOfferedClipboardLink || link == _state.value.linkInput) return
         lastOfferedClipboardLink = link
         _state.update { it.copy(clipboardLink = link) }
+        // Start reading now so the sheet is (nearly) instant when the user taps Download.
+        read(link, wholePlaylist = false)
     }
 
     fun acceptClipboardLink() {
@@ -158,9 +282,40 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         fetch(link)
     }
 
-    private fun defaultOption(info: MediaInfo): FormatOption {
+    private fun read(url: String, wholePlaylist: Boolean): Deferred<FetchResult> {
+        val key = "$wholePlaylist|$url"
+        synchronized(reads) {
+            reads[key]?.let { return it }
+            val job = viewModelScope.async {
+                val cookies = if (settings.value.useBrowserLogin) container.cookieExporter.export() else null
+                container.ytDlp.fetch(url, cookies, wholePlaylist)
+            }
+            reads[key] = job
+            return job
+        }
+    }
+
+    private fun forget(url: String, wholePlaylist: Boolean) {
+        synchronized(reads) { reads.remove("$wholePlaylist|$url") }
+    }
+
+    private fun sheetFor(result: FetchResult): MediaSheetState = when (result) {
+        is FetchResult.Video -> MediaSheetState.Ready(result.info, defaultOption(result.info.options).id)
+        is FetchResult.Playlist -> {
+            val options = YtDlpJsonParser.playlistOptions()
+            MediaSheetState.Playlist(
+                info = result.info,
+                selectedIds = result.info.entries.map { it.id }.toSet(),
+                options = options,
+                selectedOptionId = defaultOption(options).id
+            )
+        }
+    }
+
+    /** Pre-selects the quality from Settings (or the closest one below it). */
+    private fun defaultOption(options: List<FormatOption>): FormatOption {
         val preferred = settings.value.preferredVideoHeight
-        val videos = info.videoOptions
+        val videos = options.filter { it.kind == com.example.data.model.MediaKind.VIDEO }
         val byQuality = when {
             videos.isEmpty() -> null
             preferred <= 0 -> videos.first()
@@ -168,7 +323,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 ?: videos.minByOrNull { it.height }
         }
         return byQuality
-            ?: info.audioOptions.firstOrNull { it.audioFormat == settings.value.preferredAudioFormat }
-            ?: info.options.first()
+            ?: options.firstOrNull { it.audioFormat == settings.value.preferredAudioFormat }
+            ?: options.first()
     }
 }

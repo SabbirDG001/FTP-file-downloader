@@ -28,6 +28,7 @@ class AppContainer(context: Context) {
     val httpClient = HttpDirectoryClient()
     val ytDlp = YtDlpManager(context)
     val cookieExporter = BrowserCookieExporter(context)
+    val quickPreview = com.example.data.remote.social.QuickPreview()
 
     val downloadEngine = DownloadEngine(
         appContext = context,

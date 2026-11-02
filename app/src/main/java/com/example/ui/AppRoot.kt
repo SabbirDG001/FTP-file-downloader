@@ -41,6 +41,7 @@ import com.example.appContainer
 import com.example.data.model.isActive
 import com.example.ui.components.FolderAccessPrompt
 import com.example.ui.components.MediaOptionsSheet
+import com.example.ui.components.MediaSheetActions
 import com.example.ui.components.TopAppBarHeader
 import com.example.ui.navigation.Destination
 import com.example.ui.screens.browser.BrowserController
@@ -203,6 +204,9 @@ fun MediaDownloaderApp(
                 composable(Destination.SETTINGS.route) {
                     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
                     val engineState by settingsViewModel.engineState.collectAsStateWithLifecycle()
+                    val loginStatus by settingsViewModel.loginStatus.collectAsStateWithLifecycle()
+                    // Re-check logins every time Settings opens (e.g. after logging in).
+                    LaunchedEffect(Unit) { settingsViewModel.refreshLoginStatus() }
                     SettingsScreen(
                         settings = settings,
                         folderName = folderName,
@@ -211,7 +215,12 @@ fun MediaDownloaderApp(
                         onUpdate = settingsViewModel::update,
                         onPrepareEngine = settingsViewModel::prepareEngine,
                         onUpdateEngine = settingsViewModel::updateEngine,
-                        onClearBrowserLogin = settingsViewModel::clearBrowserLogin
+                        onClearBrowserLogin = settingsViewModel::clearBrowserLogin,
+                        loginStatus = loginStatus,
+                        onLogin = { url ->
+                            browserController.load(url)
+                            navController.navigateToTab(Destination.BROWSER)
+                        }
                     )
                 }
             }
@@ -220,10 +229,18 @@ fun MediaDownloaderApp(
 
     MediaOptionsSheet(
         state = homeState.sheet,
-        onSelect = homeViewModel::selectOption,
-        onDownload = homeViewModel::downloadSelected,
-        onRetry = { url -> homeViewModel.fetch(url) },
-        onDismiss = homeViewModel::dismissSheet
+        actions = remember(homeViewModel) {
+            MediaSheetActions(
+                onSelectOption = homeViewModel::selectOption,
+                onDownload = homeViewModel::downloadSelected,
+                onRetry = homeViewModel::retry,
+                onOpenWholePlaylist = homeViewModel::openWholePlaylist,
+                onToggleEntry = homeViewModel::togglePlaylistEntry,
+                onSelectAll = homeViewModel::selectAllPlaylistEntries,
+                onSelectNone = homeViewModel::clearPlaylistSelection,
+                onDismiss = homeViewModel::dismissSheet
+            )
+        }
     )
 }
 

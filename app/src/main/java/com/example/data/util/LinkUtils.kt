@@ -24,4 +24,11 @@ object LinkUtils {
 
     fun isWebUrl(text: String): Boolean =
         text.startsWith("http://", ignoreCase = true) || text.startsWith("https://", ignoreCase = true)
+
+    /**
+     * The built-in browser's user agent without the parts that mark it as an app's
+     * WebView ("; wv", "Version/4.0"). Facebook and Google block logins when they see those.
+     */
+    fun browserUserAgent(webViewDefault: String): String =
+        webViewDefault.replace("; wv)", ")").replace(Regex("""\s*Version/\d+(\.\d+)*"""), "")
 }

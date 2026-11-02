@@ -1,14 +1,11 @@
 package com.example.data.remote.social
 
 import android.content.Context
-import com.example.data.model.FormatOption
-import com.example.data.model.MediaInfo
+import com.example.data.model.FetchResult
 import com.example.data.model.MediaKind
-import com.example.data.model.Platform
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
-import com.yausername.youtubedl_android.mapper.VideoFormat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +32,11 @@ sealed interface EngineState {
  * YouTube, Facebook, Instagram, TikTok and ~1,800 other sites.
  */
 class YtDlpManager(private val context: Context) {
+
+    companion object {
+        /** Very long playlists / channels are cut here so reading them stays quick. */
+        const val MAX_PLAYLIST_ITEMS = 1000
+    }
 
     private val initLock = Mutex()
     @Volatile private var initialized = false
@@ -86,27 +88,33 @@ class YtDlpManager(private val context: Context) {
     private fun currentVersion(): String =
         runCatching { YoutubeDL.getInstance().version(context) }.getOrNull() ?: "unknown"
 
-    /** Reads title, thumbnail and available qualities for a post. */
-    suspend fun fetchInfo(url: String, cookiesFile: File?): MediaInfo {
+    /**
+     * Reads a link. One yt-dlp run returns either a single video with its qualities, or
+     * a playlist with a quick list of its videos (`--flat-playlist` skips opening each one).
+     *
+     * @param wholePlaylist read the playlist even when the link also points at one video.
+     */
+    suspend fun fetch(url: String, cookiesFile: File?, wholePlaylist: Boolean = false): FetchResult {
         ensureReady()
-        val info = withContext(Dispatchers.IO) {
+        val playlistMode = wholePlaylist || YtDlpJsonParser.isPlaylistOnlyUrl(url)
+        val json = withContext(Dispatchers.IO) {
             val request = YoutubeDLRequest(url).apply {
-                addOption("--no-playlist")
+                addOption("-J")
+                addOption("--flat-playlist")
+                addOption(if (playlistMode) "--yes-playlist" else "--no-playlist")
+                addOption("--playlist-end", MAX_PLAYLIST_ITEMS)
+                addOption("--no-warnings")
+                addOption("--socket-timeout", 20)
                 cookiesFile?.let { addOption("--cookies", it.absolutePath) }
             }
-            runInterruptible { YoutubeDL.getInstance().getInfo(request) }
+            try {
+                runInterruptible { YoutubeDL.getInstance().execute(request).out }
+            } catch (e: YoutubeDL.CanceledException) {
+                throw CancellationException("Stopped")
+            }
         }
-
-        val platform = Platform.fromUrl(info.webpageUrl ?: url)
-        return MediaInfo(
-            pageUrl = info.webpageUrl ?: url,
-            title = (info.title ?: info.fulltitle).orEmpty().ifBlank { "${platform.displayName} video" },
-            uploader = info.uploader.orEmpty(),
-            thumbnailUrl = info.thumbnail.orEmpty(),
-            durationSeconds = info.duration,
-            platform = platform,
-            options = buildOptions(info.formats.orEmpty())
-        )
+        if (json.isNullOrBlank() || !json.contains('{')) throw IOException("yt-dlp returned no information for this link")
+        return YtDlpJsonParser.parse(json, url)
     }
 
     /**
@@ -175,92 +183,6 @@ class YtDlpManager(private val context: Context) {
                     !file.name.endsWith(".temp")
             }
             ?.maxByOrNull { it.length() }
-
-    // region Format options
-
-    private fun buildOptions(formats: List<VideoFormat>): List<FormatOption> {
-        val options = mutableListOf<FormatOption>()
-
-        val bestAudio = formats
-            .filter { it.hasAudio() && !it.hasVideo() }
-            .maxByOrNull { maxOf(it.abr, it.tbr) }
-        val audioSize = bestAudio?.sizeBytes() ?: 0L
-
-        val videoFormats = formats.filter { it.hasVideo() && it.height > 0 }
-        val heights = videoFormats.map { it.height }.distinct().sortedDescending()
-
-        for (height in heights) {
-            val best = videoFormats.filter { it.height == height }.maxByOrNull { it.tbr }
-            val videoSize = best?.sizeBytes() ?: 0L
-            val needsAudio = best != null && !best.hasAudio()
-            val estimate = when {
-                videoSize <= 0 -> 0L
-                needsAudio -> videoSize + audioSize
-                else -> videoSize
-            }
-            val fps = best?.fps ?: 0
-            options += FormatOption(
-                id = "video_$height",
-                label = qualityLabel(height),
-                detail = buildString {
-                    append("MP4")
-                    if (fps > 30) append(" • ${fps}fps")
-                },
-                kind = MediaKind.VIDEO,
-                selector = "bv*[height<=$height]+ba/b[height<=$height]/bv*+ba/b",
-                extension = "mp4",
-                height = height,
-                estimatedBytes = estimate
-            )
-        }
-
-        if (options.isEmpty()) {
-            // Some sites (e.g. many Instagram/Facebook posts) only report one combined format.
-            options += FormatOption(
-                id = "video_best",
-                label = "Best quality",
-                detail = "MP4",
-                kind = MediaKind.VIDEO,
-                selector = "bv*+ba/b",
-                extension = "mp4"
-            )
-        }
-
-        options += FormatOption(
-            id = "audio_mp3",
-            label = "MP3",
-            detail = "Audio only",
-            kind = MediaKind.AUDIO,
-            selector = "ba/b",
-            extension = "mp3",
-            estimatedBytes = audioSize,
-            audioFormat = "mp3"
-        )
-        options += FormatOption(
-            id = "audio_m4a",
-            label = "M4A",
-            detail = "Audio only • best quality",
-            kind = MediaKind.AUDIO,
-            selector = "ba[ext=m4a]/ba/b",
-            extension = "m4a",
-            estimatedBytes = audioSize,
-            audioFormat = "m4a"
-        )
-        return options
-    }
-
-    private fun VideoFormat.hasVideo() = !vcodec.isNullOrBlank() && vcodec != "none"
-    private fun VideoFormat.hasAudio() = !acodec.isNullOrBlank() && acodec != "none"
-    private fun VideoFormat.sizeBytes() = if (fileSize > 0) fileSize else fileSizeApproximate
-
-    private fun qualityLabel(height: Int): String = when {
-        height >= 4320 -> "8K"
-        height >= 2160 -> "4K"
-        height >= 1440 -> "1440p"
-        else -> "${height}p"
-    }
-
-    // endregion
 }
 
 /** What to download, taken from the chosen [FormatOption]. */

@@ -2,6 +2,7 @@ package com.example.data.remote.social
 
 import android.content.Context
 import android.webkit.CookieManager
+import com.example.data.model.Platform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -57,7 +58,32 @@ class BrowserCookieExporter(private val context: Context) {
         withContext(Dispatchers.IO) { cookieFile.delete() }
     }
 
-    private companion object {
+    /** Which sites the user is logged into in the built-in browser. */
+    suspend fun loginStatus(): Map<Platform, Boolean> = withContext(Dispatchers.Main) {
+        runCatching {
+            val manager = CookieManager.getInstance()
+            LOGIN_SITES.mapValues { (_, site) ->
+                val cookies = manager.getCookie(site.cookieUrl).orEmpty()
+                cookies.split(";").any { it.trim().substringBefore('=') == site.sessionCookie }
+            }
+        }.getOrDefault(LOGIN_SITES.mapValues { false })
+    }
+
+    /** Where to log in, and the cookie that only exists once logged in. */
+    data class LoginSite(val loginUrl: String, val cookieUrl: String, val sessionCookie: String)
+
+    companion object {
+        val LOGIN_SITES: Map<Platform, LoginSite> = linkedMapOf(
+            Platform.FACEBOOK to LoginSite("https://m.facebook.com/login/", "https://www.facebook.com", "c_user"),
+            Platform.INSTAGRAM to LoginSite("https://www.instagram.com/accounts/login/", "https://www.instagram.com", "sessionid"),
+            Platform.YOUTUBE to LoginSite(
+                "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fm.youtube.com%2F",
+                "https://www.youtube.com", "LOGIN_INFO"
+            ),
+            Platform.TIKTOK to LoginSite("https://www.tiktok.com/login", "https://www.tiktok.com", "sessionid"),
+            Platform.TWITTER to LoginSite("https://x.com/i/flow/login", "https://x.com", "auth_token")
+        )
+
         val DOMAINS = listOf(
             "youtube.com", "google.com", "facebook.com", "instagram.com",
             "tiktok.com", "x.com", "twitter.com", "vimeo.com"

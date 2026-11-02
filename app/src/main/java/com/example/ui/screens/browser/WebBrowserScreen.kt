@@ -2,11 +2,14 @@ package com.example.ui.screens.browser
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Message
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -55,6 +58,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import com.example.data.model.Platform
 import com.example.data.util.LinkUtils
 import com.example.ui.components.PlatformBadge
@@ -87,19 +92,31 @@ class BrowserController {
         return WebView(context).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.javaScriptCanOpenWindowsAutomatically = true
             settings.mediaPlaybackRequiresUserGesture = true
             settings.loadWithOverviewMode = true
             settings.useWideViewPort = true
             settings.setSupportZoom(true)
             settings.builtInZoomControls = true
             settings.displayZoomControls = false
+            // Look like normal mobile Chrome. Facebook, Google and others refuse to log in
+            // when they see they're inside an app's "WebView".
+            settings.userAgentString = LinkUtils.browserUserAgent(WebSettings.getDefaultUserAgent(context))
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+                // Stop sending the app's package name to websites with every request.
+                WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, emptySet())
+            }
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                    // Stay inside the app for web links; ignore app-only schemes like intent://.
-                    return !LinkUtils.isWebUrl(request.url.toString())
+                    val url = request.url.toString()
+                    if (LinkUtils.isWebUrl(url)) return false
+                    // Login pages sometimes try to open the site's app ("intent://", "fb://").
+                    // Use the web page they offer as a fallback instead.
+                    fallbackUrl(url)?.let { view.loadUrl(it) }
+                    return true
                 }
 
                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
@@ -116,12 +133,32 @@ class BrowserController {
                 override fun onPageFinished(view: WebView, url: String?) {
                     url?.let { currentUrl = it }
                     updateNavigation(view)
+                    // Save login cookies to disk right away so downloads can use them.
                     CookieManager.getInstance().flush()
                 }
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView, newProgress: Int) {
                     this@BrowserController.progress = newProgress
+                }
+
+                // "Log in with…" buttons often open a pop-up window. Show it in this browser.
+                override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
+                    val popup = WebView(view.context)
+                    popup.settings.javaScriptEnabled = true
+                    popup.settings.userAgentString = view.settings.userAgentString
+                    popup.webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(popupView: WebView, request: WebResourceRequest): Boolean {
+                            val target = request.url.toString()
+                            view.loadUrl(if (LinkUtils.isWebUrl(target)) target else fallbackUrl(target) ?: return true)
+                            popupView.destroy()
+                            return true
+                        }
+                    }
+                    val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                    transport.webView = popup
+                    resultMsg.sendToTarget()
+                    return true
                 }
             }
             webView = this
@@ -261,6 +298,18 @@ private fun EmptyBrowser(onOpen: (String) -> Unit) {
             }
         }
     }
+}
+
+/** For "intent://…#Intent;…;S.browser_fallback_url=…;end" links, the web page to open instead. */
+private fun fallbackUrl(url: String): String? = try {
+    if (url.startsWith("intent:")) {
+        Intent.parseUri(url, Intent.URI_INTENT_SCHEME).getStringExtra("browser_fallback_url")
+            ?.takeIf { LinkUtils.isWebUrl(it) }
+    } else {
+        null
+    }
+} catch (_: Exception) {
+    null
 }
 
 private fun toUrlOrSearch(text: String): String {
