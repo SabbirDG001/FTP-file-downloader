@@ -12,7 +12,7 @@ An Android app (Kotlin + Jetpack Compose) for downloading:
 | Area | What it does |
 | --- | --- |
 | Home | Paste a link → see thumbnail, title and duration → pick a quality (1080p, 720p, … or MP3 / M4A audio) → download. Detects links you copied in other apps. |
-| Playlists | Paste a playlist link (or tap "choose videos from it" on a video that's in one), tick the videos you want, pick one quality for all, and download them together into a folder named after the playlist. |
+| Playlists | Paste a playlist link (or tap "choose videos from it" on a video that's in one), tick the videos you want, pick one quality for all, and choose where to save them: a new folder (named after the playlist by default) or any folder on the phone or SD card. |
 | Share to app | In YouTube / Facebook / Instagram tap **Share → Media Downloader**. |
 | Browser | Built-in browser with shortcuts to each site and a **Download** button for the page you're on. Logging in here lets the app download private posts you can see (cookies stay on the device). |
 | Servers | FTP / web-directory browser (server settings are saved) and the Direct link / Season downloader. |

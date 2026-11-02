@@ -46,7 +46,7 @@ class HttpDownloader(
     override suspend fun download(task: DownloadTask, reporter: ProgressReporter): DownloadOutcome {
         val existing = storage.existingFile(task.outputUri)
         val resumeFrom = if (task.downloadedBytes > 0) existing?.length() ?: 0L else 0L
-        val file = existing ?: storage.createFile(task.subFolder, task.fileName)
+        val file = existing ?: storage.createFile(task.subFolder, task.fileName, task.targetTreeUri)
             ?: throw IOException(NO_FOLDER_MESSAGE)
         val name = file.name ?: task.fileName
         reporter.onFileCreated(file.uri.toString(), name)
@@ -74,7 +74,7 @@ class FtpDownloader(
     override suspend fun download(task: DownloadTask, reporter: ProgressReporter): DownloadOutcome {
         val existing = storage.existingFile(task.outputUri)
         val resumeFrom = if (task.downloadedBytes > 0) existing?.length() ?: 0L else 0L
-        val file = existing ?: storage.createFile(task.subFolder, task.fileName)
+        val file = existing ?: storage.createFile(task.subFolder, task.fileName, task.targetTreeUri)
             ?: throw IOException(NO_FOLDER_MESSAGE)
         val name = file.name ?: task.fileName
         reporter.onFileCreated(file.uri.toString(), name)
@@ -131,7 +131,7 @@ class SocialDownloader(
 
         val size = downloaded.length()
         val saved = withContext(Dispatchers.IO) {
-            storage.copyIntoFolder(downloaded, task.subFolder) { copied, total ->
+            storage.copyIntoFolder(downloaded, task.subFolder, task.targetTreeUri) { copied, total ->
                 reporter.onProgress(copied, total, 0L)
             }
         }

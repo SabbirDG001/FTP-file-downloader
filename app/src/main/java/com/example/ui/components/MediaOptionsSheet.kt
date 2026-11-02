@@ -26,7 +26,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Videocam
@@ -40,6 +42,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -75,6 +78,9 @@ class MediaSheetActions(
     val onToggleEntry: (String) -> Unit,
     val onSelectAll: () -> Unit,
     val onSelectNone: () -> Unit,
+    val onFolderNameChange: (String) -> Unit,
+    val onPickFolder: () -> Unit,
+    val onUseNewFolder: () -> Unit,
     val onDismiss: () -> Unit
 )
 
@@ -284,7 +290,10 @@ private fun PlaylistContent(state: MediaSheetState.Playlist, actions: MediaSheet
         }
     }
 
-    Spacer(modifier = Modifier.height(8.dp))
+    Spacer(modifier = Modifier.height(4.dp))
+    SaveToSection(state, actions)
+
+    Spacer(modifier = Modifier.height(4.dp))
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Text(
             text = "${state.selectedIds.size} of ${info.entries.size} selected",
@@ -331,6 +340,61 @@ private fun PlaylistContent(state: MediaSheetState.Playlist, actions: MediaSheet
         enabled = count > 0 && state.selectedOption != null,
         onClick = actions.onDownload
     )
+}
+
+/** Where the playlist is saved: a new folder (name it) or any folder picked on the phone. */
+@Composable
+private fun SaveToSection(state: MediaSheetState.Playlist, actions: MediaSheetActions) {
+    val usingPicked = state.pickedFolderUri != null
+    SectionLabel("SAVE TO")
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = actions.onUseNewFolder)
+    ) {
+        RadioButton(selected = !usingPicked, onClick = actions.onUseNewFolder)
+        OutlinedTextField(
+            value = state.newFolderName,
+            onValueChange = actions.onFolderNameChange,
+            label = { Text("New folder name") },
+            leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .weight(1f)
+                .testTag("playlist_folder_name")
+        )
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = actions.onPickFolder)
+            .padding(vertical = 2.dp)
+            .testTag("playlist_pick_folder")
+    ) {
+        RadioButton(selected = usingPicked, onClick = actions.onPickFolder)
+        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = if (usingPicked) state.pickedFolderName.orEmpty() else "Choose a folder on my phone…",
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = if (usingPicked) "Tap to choose a different folder" else "Any folder or SD card • you can create one there too",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 @Composable

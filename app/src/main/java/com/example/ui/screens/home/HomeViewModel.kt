@@ -48,7 +48,12 @@ sealed interface MediaSheetState {
         val info: PlaylistInfo,
         val selectedIds: Set<String>,
         val options: List<FormatOption>,
-        val selectedOptionId: String
+        val selectedOptionId: String,
+        /** Name of the new folder created inside the download folder. */
+        val newFolderName: String,
+        /** A folder picked anywhere on the phone instead; null = use [newFolderName]. */
+        val pickedFolderUri: String? = null,
+        val pickedFolderName: String? = null
     ) : MediaSheetState {
         val selectedOption: FormatOption?
             get() = options.firstOrNull { it.id == selectedOptionId }
@@ -172,6 +177,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearPlaylistSelection() = updatePlaylist { it.copy(selectedIds = emptySet()) }
 
+    /** "New folder" name typed by the user. */
+    fun setPlaylistFolderName(name: String) = updatePlaylist {
+        it.copy(newFolderName = name, pickedFolderUri = null, pickedFolderName = null)
+    }
+
+    /** A folder chosen with the system folder picker (anywhere on the phone or SD card). */
+    fun setPlaylistPickedFolder(uri: String, name: String) = updatePlaylist {
+        it.copy(pickedFolderUri = uri, pickedFolderName = name)
+    }
+
+    /** Go back to saving into a new folder inside the download folder. */
+    fun usePlaylistNewFolder() = updatePlaylist { it.copy(pickedFolderUri = null, pickedFolderName = null) }
+
     private fun updatePlaylist(transform: (MediaSheetState.Playlist) -> MediaSheetState.Playlist) {
         _state.update { state ->
             val sheet = state.sheet
@@ -216,14 +234,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             _messages.tryEmit("Tick at least one video")
             return
         }
-        // Each playlist gets its own folder, e.g. "My Music Mix".
-        val folder = StorageHelper.cleanFileName(info.title).take(80).ifBlank { info.platform.folderName }
+        // Either straight into a folder the user picked, or a new (or existing) folder
+        // with the typed name inside the download folder.
+        val picked = sheet.pickedFolderUri
+        val folder = if (picked != null) {
+            ""
+        } else {
+            StorageHelper.cleanFileName(sheet.newFolderName).take(80)
+                .ifBlank { StorageHelper.cleanFileName(info.title).take(80) }
+                .ifBlank { info.platform.folderName }
+        }
         val tasks = chosen.map { entry ->
             socialTask(entry.url, entry.title, entry.thumbnailUrl, info.platform, option, folder)
+                .copy(targetTreeUri = picked.orEmpty())
         }
         container.downloadEngine.enqueue(tasks)
         _state.update { it.copy(sheet = MediaSheetState.Hidden, linkInput = "") }
-        _messages.tryEmit("${tasks.size} videos added (${option.label})")
+        val where = sheet.pickedFolderName ?: folder
+        _messages.tryEmit("${tasks.size} videos added (${option.label}) → $where")
     }
 
     private fun socialTask(
@@ -307,7 +335,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 info = result.info,
                 selectedIds = result.info.entries.map { it.id }.toSet(),
                 options = options,
-                selectedOptionId = defaultOption(options).id
+                selectedOptionId = defaultOption(options).id,
+                newFolderName = StorageHelper.cleanFileName(result.info.title).take(80)
             )
         }
     }

@@ -85,13 +85,29 @@ class StorageHelper(private val context: Context) {
         }
     }
 
+    /**
+     * Keeps permission to write to a folder the user picked for one download (e.g. a
+     * playlist). Returns its display name, or null if access couldn't be kept.
+     */
+    fun grantExtraFolder(uri: Uri): String? = try {
+        context.contentResolver.takePersistableUriPermission(
+            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
+        DocumentFile.fromTreeUri(context, uri)?.name ?: uri.lastPathSegment ?: "Selected folder"
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+
     // endregion
 
     // region Writing files
 
     /** Creates a new file in the download folder (inside [subFolderName] if given). */
-    fun createFile(subFolderName: String?, fileName: String): DocumentFile? {
-        val treeUri = getSavedFolderUri() ?: return null
+    fun createFile(subFolderName: String?, fileName: String, targetTreeUri: String = ""): DocumentFile? {
+        val treeUri = targetTreeUri.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
+            ?: getSavedFolderUri()
+            ?: return null
         val rootDoc = DocumentFile.fromTreeUri(context, treeUri) ?: return null
         if (!rootDoc.canWrite()) return null
 
@@ -134,9 +150,10 @@ class StorageHelper(private val context: Context) {
     fun copyIntoFolder(
         source: File,
         subFolderName: String?,
+        targetTreeUri: String = "",
         onProgress: (copied: Long, total: Long) -> Unit
     ): DocumentFile {
-        val target = createFile(subFolderName, source.name)
+        val target = createFile(subFolderName, source.name, targetTreeUri)
             ?: throw IOException("Unable to create ${source.name} in the download folder")
         val total = source.length()
         var copied = 0L

@@ -49,6 +49,11 @@ data class DownloadTask(
     val errorMessage: String? = null,
     /** Sub folder inside the chosen download folder ("Movies", "YouTube", ...). */
     val subFolder: String = "",
+    /**
+     * A different folder picked for this download (e.g. a playlist saved somewhere else
+     * on the phone). Empty means the main download folder.
+     */
+    val targetTreeUri: String = "",
     /** Storage Access Framework URI of the saved file. */
     val outputUri: String? = null,
     val createdAt: Long = System.currentTimeMillis(),

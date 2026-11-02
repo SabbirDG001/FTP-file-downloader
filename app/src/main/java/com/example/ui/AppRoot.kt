@@ -77,6 +77,14 @@ fun MediaDownloaderApp(
         if (uri != null) storage.saveFolderUri(uri)
     }
 
+    // Folder picker for saving a playlist somewhere other than the download folder.
+    val playlistFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+        if (uri != null) {
+            val name = storage.grantExtraFolder(uri)
+            if (name != null) homeViewModel.setPlaylistPickedFolder(uri.toString(), name)
+        }
+    }
+
     if (folderUri == null) {
         FolderAccessPrompt(onFolderGranted = { uri -> storage.saveFolderUri(uri) })
         return
@@ -229,7 +237,7 @@ fun MediaDownloaderApp(
 
     MediaOptionsSheet(
         state = homeState.sheet,
-        actions = remember(homeViewModel) {
+        actions = remember(homeViewModel, playlistFolderPicker) {
             MediaSheetActions(
                 onSelectOption = homeViewModel::selectOption,
                 onDownload = homeViewModel::downloadSelected,
@@ -238,6 +246,9 @@ fun MediaDownloaderApp(
                 onToggleEntry = homeViewModel::togglePlaylistEntry,
                 onSelectAll = homeViewModel::selectAllPlaylistEntries,
                 onSelectNone = homeViewModel::clearPlaylistSelection,
+                onFolderNameChange = homeViewModel::setPlaylistFolderName,
+                onPickFolder = { playlistFolderPicker.launch(null) },
+                onUseNewFolder = homeViewModel::usePlaylistNewFolder,
                 onDismiss = homeViewModel::dismissSheet
             )
         }
