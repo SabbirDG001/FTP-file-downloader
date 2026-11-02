@@ -38,16 +38,22 @@ jobs:
         run: |
           mkdir -p out
           cd app/build/outputs/apk/debug
-          cp app-arm64-v8a-debug.apk   "$GITHUB_WORKSPACE/out/MediaDownloader-most-phones.apk"
-          cp app-armeabi-v7a-debug.apk "$GITHUB_WORKSPACE/out/MediaDownloader-older-phones.apk"
-          cp app-universal-debug.apk   "$GITHUB_WORKSPACE/out/MediaDownloader-any-phone.apk"
+          cp app-arm64-v8a-debug.apk   "$GITHUB_WORKSPACE/out/MediaDL-most-phones.apk"
+          cp app-armeabi-v7a-debug.apk "$GITHUB_WORKSPACE/out/MediaDL-older-phones.apk"
+          cp app-universal-debug.apk   "$GITHUB_WORKSPACE/out/MediaDL-any-phone.apk"
           ls -la "$GITHUB_WORKSPACE/out"
 
       - name: Keep the APKs with this run
         uses: actions/upload-artifact@v4
         with:
-          name: MediaDownloader-apks
+          name: MediaDL-apks
           path: out/*.apk
+
+      - name: Keep the emulator APK for the crash test
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-apk
+          path: app/build/outputs/apk/debug/app-x86_64-debug.apk
 
       - name: Publish as "Latest test build" on the Releases page
         env:
@@ -58,7 +64,45 @@ jobs:
             --target "$GITHUB_SHA" \
             --prerelease \
             --title "Latest test build (${GITHUB_REF_NAME})" \
-            --notes "Built automatically from branch ${GITHUB_REF_NAME}, commit ${GITHUB_SHA::7}. Most phones: download MediaDownloader-most-phones.apk. If it won't install, use MediaDownloader-any-phone.apk."
+            --notes "Built automatically from branch ${GITHUB_REF_NAME}, commit ${GITHUB_SHA::7}. Most phones: download MediaDL-most-phones.apk. If it won't install, use MediaDL-any-phone.apk."
 
       - name: Run unit tests
         run: gradle testDebugUnitTest
+
+  # Opens the app on a virtual Android phone and fails if it crashes, with the crash
+  # details in the log. Catches "keeps stopping" problems before they reach a phone.
+  crash-test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: emulator-apk
+          path: apk
+
+      - name: Enable KVM (makes the emulator fast)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Open the app on an Android 14 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash .github/scripts/smoke-test.sh
+
+      - name: Keep the emulator logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-logcat
+          path: logcat-*.txt
+          if-no-files-found: ignore

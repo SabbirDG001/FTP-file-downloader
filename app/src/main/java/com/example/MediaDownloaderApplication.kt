@@ -52,6 +52,7 @@ class MediaDownloaderApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashReporter.install(this)
         container = AppContainer(this)
         if (!isRunningInTests()) prepareSocialEngine()
     }

@@ -37,7 +37,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.CrashReporter
 import com.example.appContainer
+import com.example.ui.components.CrashReportDialog
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.example.data.model.isActive
 import com.example.ui.components.FolderAccessPrompt
 import com.example.ui.components.MediaOptionsSheet
@@ -72,6 +76,15 @@ fun MediaDownloaderApp(
     val folderName by storage.folderName.collectAsStateWithLifecycle()
 
     RequestNotificationPermission()
+
+    // If the app crashed last time, show what happened so it can be copied and sent.
+    var crashReport by remember { mutableStateOf(CrashReporter.lastCrash(context)) }
+    crashReport?.let { report ->
+        CrashReportDialog(report = report, onClose = {
+            CrashReporter.clear(context)
+            crashReport = null
+        })
+    }
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
         if (uri != null) storage.saveFolderUri(uri)

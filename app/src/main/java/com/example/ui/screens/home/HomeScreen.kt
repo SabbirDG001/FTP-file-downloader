@@ -197,7 +197,7 @@ fun HomeScreen(
                 Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = "Tip: in YouTube, Facebook or Instagram tap Share → Media Downloader to download straight away.",
+                    text = "Tip: in YouTube, Facebook or Instagram tap Share → MediaDL to download straight away.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

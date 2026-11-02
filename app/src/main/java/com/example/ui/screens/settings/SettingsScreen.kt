@@ -174,7 +174,7 @@ fun SettingsScreen(
         }
 
         Section("About") {
-            Text("Media Downloader ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
+            Text("MediaDL ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
             Text(
                 text = "Only download videos you own or have permission to save. Respect each site's terms of service and copyright.",
                 style = MaterialTheme.typography.bodySmall,
