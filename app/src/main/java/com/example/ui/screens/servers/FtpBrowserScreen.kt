@@ -1,4 +1,4 @@
-package com.example.ui.screens
+package com.example.ui.screens.servers
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
@@ -31,13 +31,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -69,13 +69,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.RemoteFileItem
-import com.example.ui.theme.PrimaryPurple
 import com.example.ui.theme.StatusError
-import com.example.ui.viewmodel.BrowserUiState
+import com.example.ui.theme.StatusSuccess
 
 @Composable
-fun BrowserScreen(
+fun FtpBrowserScreen(
     browserState: BrowserUiState,
+    serverName: String,
+    serverAddress: String,
+    canNavigateUp: Boolean,
+    onEditServer: () -> Unit,
     isConnected: Boolean,
     isConnecting: Boolean,
     connectionError: String?,
@@ -97,8 +100,16 @@ fun BrowserScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
 
+            ServerHeader(
+                serverName = serverName,
+                serverAddress = serverAddress,
+                isConnected = isConnected,
+                onEditServer = onEditServer
+            )
+
             // Connection or browse error banner
-            if (connectionError != null) {
+            val bannerError = connectionError ?: browserState.errorMessage
+            if (bannerError != null) {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -121,12 +132,12 @@ fun BrowserScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = connectionError,
+                            text = bannerError,
                             style = MaterialTheme.typography.bodySmall,
                             color = StatusError,
                             modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = onConnect) {
+                        TextButton(onClick = { if (connectionError != null) onConnect() else onNavigate(browserState.currentPath) }) {
                             Text("Retry", color = StatusError, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -152,7 +163,7 @@ fun BrowserScreen(
                 ) {
                     IconButton(
                         onClick = onNavigateUp,
-                        enabled = browserState.currentPath != "/" && isConnected,
+                        enabled = canNavigateUp,
                         modifier = Modifier
                             .size(36.dp)
                             .testTag("navigate_up_button")
@@ -160,7 +171,7 @@ fun BrowserScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Parent folder",
-                            tint = if (browserState.currentPath != "/" && isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                            tint = if (canNavigateUp) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                         )
                     }
 
@@ -297,13 +308,13 @@ fun BrowserScreen(
                                 }
                                 Spacer(modifier = Modifier.height(14.dp))
                                 Text(
-                                    text = "Not Connected to FTP",
+                                    text = "Not connected",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "Connect to Samonline or your FTP server to browse files",
+                                    text = "Connect to $serverName to browse its files",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -351,12 +362,6 @@ fun BrowserScreen(
                                 ) {
                                     Text("Select Videos", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                                 }
-                                Icon(
-                                    imageVector = Icons.Default.Sort,
-                                    contentDescription = "Sort order",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
                             }
                         }
 
@@ -615,6 +620,50 @@ private fun FileListItem(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ServerHeader(
+    serverName: String,
+    serverAddress: String,
+    isConnected: Boolean,
+    onEditServer: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(if (isConnected) StatusSuccess else MaterialTheme.colorScheme.outline)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = serverName,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = serverAddress,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        TextButton(onClick = onEditServer, modifier = Modifier.testTag("edit_server_button")) {
+            Icon(Icons.Default.Dns, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Change server", fontSize = 13.sp)
         }
     }
 }

@@ -1,4 +1,4 @@
-package com.example.ui.screens
+package com.example.ui.screens.servers
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -47,12 +47,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.RemoteFileItem
-import com.example.ui.theme.PrimaryPurple
 import com.example.ui.theme.StatusError
-import com.example.ui.viewmodel.DirectUrlState
 
 @Composable
-fun DirectUrlScreen(
+fun DirectLinkScreen(
     state: DirectUrlState,
     onUrlChange: (String) -> Unit,
     onFolderChange: (String) -> Unit,
@@ -91,7 +89,7 @@ fun DirectUrlScreen(
                     )
 
                     Text(
-                        text = "Works exactly like media_downloader.py — paste a direct video link or a Season directory URL to fetch and download all episodes automatically.",
+                        text = "Paste a direct video link, or a season folder URL to find and download every episode at once.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -301,7 +299,7 @@ fun DirectUrlScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = String.format("%02d", index + 1),
+                                text = String.format(java.util.Locale.US, "%02d", index + 1),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer

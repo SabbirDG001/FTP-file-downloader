@@ -108,7 +108,7 @@ fun FolderAccessPrompt(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Select a download folder to store downloaded movies, series, and files.",
+                    text = "Choose a folder for your downloads: YouTube, Facebook and Instagram videos, movies, series and other files.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -126,7 +126,7 @@ fun FolderAccessPrompt(
                 FeatureItem(
                     icon = Icons.Default.CheckCircle,
                     title = "Automatic Subfolders",
-                    subtitle = "Keeps Movies & Web Series neatly separated"
+                    subtitle = "Keeps YouTube, Movies & Web Series neatly separated"
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 FeatureItem(

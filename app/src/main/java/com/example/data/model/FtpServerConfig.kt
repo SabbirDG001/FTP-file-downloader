@@ -5,6 +5,7 @@ enum class ServerProtocol {
     HTTP_WEB
 }
 
+/** Connection details for the server browser (an FTP server or an HTTP directory listing). */
 data class FtpServerConfig(
     val name: String = "Samonline FTP",
     val host: String = "172.16.50.4",
