@@ -29,7 +29,10 @@ android {
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
+      // Use a local debug.keystore if present; otherwise the shared one in this repo, so
+      // builds made on GitHub always have the same signature and install over each other.
+      val localKeystore = file("${rootDir}/debug.keystore")
+      storeFile = if (localKeystore.exists()) localKeystore else file("ci-debug.keystore")
       storePassword = "android"
       keyAlias = "androiddebugkey"
       keyPassword = "android"

@@ -47,6 +47,18 @@ app/src/main/java/com/example/
 
 ## Building
 
+### Without Android Studio (on your phone)
+
+Every push is built automatically on GitHub (see `.github/workflows/build-apk.yml`):
+
+1. On your phone, open the repository on GitHub → **Releases** → **Latest test build**.
+2. Download `MediaDownloader-most-phones.apk` (or `MediaDownloader-any-phone.apk` if that one won't install).
+3. Open the file and allow "Install unknown apps" for your browser when Android asks.
+
+If a build fails, the error is on the repository's **Actions** tab.
+
+### With Android Studio
+
 Open the project in Android Studio (or run `./gradlew assembleDebug`). The build produces
 one APK per CPU type (`arm64-v8a` for almost all modern phones) plus a universal APK, in
 `app/build/outputs/apk/`.
