@@ -3,6 +3,7 @@ package com.example.data.remote.social
 import android.content.Context
 import com.example.data.model.FetchResult
 import com.example.data.model.MediaKind
+import com.example.data.model.Platform
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -36,6 +37,9 @@ class YtDlpManager(private val context: Context) {
     companion object {
         /** Very long playlists / channels are cut here so reading them stays quick. */
         const val MAX_PLAYLIST_ITEMS = 1000
+
+        /** See [useFastYouTube]. */
+        const val FAST_YOUTUBE_ARGS = "youtube:player_client=visionos"
     }
 
     private val initLock = Mutex()
@@ -97,6 +101,23 @@ class YtDlpManager(private val context: Context) {
     suspend fun fetch(url: String, cookiesFile: File?, wholePlaylist: Boolean = false): FetchResult {
         ensureReady()
         val playlistMode = wholePlaylist || YtDlpJsonParser.isPlaylistOnlyUrl(url)
+        // YouTube: try the quick way first, fall back to the full (slow) read if it fails
+        // or finds no video qualities.
+        if (useFastYouTube(url) && !playlistMode) {
+            val fast = runCatching { fetchOnce(url, cookiesFile, playlistMode, fastYouTube = true) }
+            fast.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+            val result = fast.getOrNull()
+            if (result is FetchResult.Video && result.info.videoOptions.any { it.height > 0 }) return result
+        }
+        return fetchOnce(url, cookiesFile, playlistMode, fastYouTube = false)
+    }
+
+    private suspend fun fetchOnce(
+        url: String,
+        cookiesFile: File?,
+        playlistMode: Boolean,
+        fastYouTube: Boolean
+    ): FetchResult {
         val json = withContext(Dispatchers.IO) {
             val request = YoutubeDLRequest(url).apply {
                 addOption("-J")
@@ -105,6 +126,7 @@ class YtDlpManager(private val context: Context) {
                 addOption("--playlist-end", MAX_PLAYLIST_ITEMS)
                 addOption("--no-warnings")
                 addOption("--socket-timeout", 20)
+                if (fastYouTube) addOption("--extractor-args", FAST_YOUTUBE_ARGS)
                 cookiesFile?.let { addOption("--cookies", it.absolutePath) }
             }
             try {
@@ -116,6 +138,13 @@ class YtDlpManager(private val context: Context) {
         if (json.isNullOrBlank() || !json.contains('{')) throw IOException("yt-dlp returned no information for this link")
         return YtDlpJsonParser.parse(json, url)
     }
+
+    /**
+     * YouTube makes yt-dlp solve a JavaScript puzzle before it shows most formats. On a
+     * phone (QuickJS) that can take a minute or more. The "visionos" YouTube client needs
+     * no puzzle, so it is much faster; it may miss a few formats, so we fall back if needed.
+     */
+    private fun useFastYouTube(url: String) = Platform.fromUrl(url) == Platform.YOUTUBE
 
     /**
      * Runs the download into [workDir] and returns the finished file. Cancelling the
@@ -133,6 +162,29 @@ class YtDlpManager(private val context: Context) {
         ensureReady()
         workDir.mkdirs()
 
+        if (useFastYouTube(pageUrl)) {
+            try {
+                return downloadOnce(pageUrl, processId, workDir, baseFileName, option, cookiesFile, onProgress, fastYouTube = true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // The quick way didn't work for this video: start again the full way.
+                workDir.listFiles()?.forEach { it.deleteRecursively() }
+            }
+        }
+        return downloadOnce(pageUrl, processId, workDir, baseFileName, option, cookiesFile, onProgress, fastYouTube = false)
+    }
+
+    private suspend fun downloadOnce(
+        pageUrl: String,
+        processId: String,
+        workDir: File,
+        baseFileName: String,
+        option: DownloadRequestOptions,
+        cookiesFile: File?,
+        onProgress: (YtDlpProgress) -> Unit,
+        fastYouTube: Boolean
+    ): File {
         val request = YoutubeDLRequest(pageUrl).apply {
             addOption("-o", File(workDir, "$baseFileName.%(ext)s").absolutePath)
             addOption("--no-playlist")
@@ -140,6 +192,7 @@ class YtDlpManager(private val context: Context) {
             addOption("--continue")
             addOption("--concurrent-fragments", 4)
             if (option.rateLimitBytesPerSec > 0) addOption("--limit-rate", option.rateLimitBytesPerSec)
+            if (fastYouTube) addOption("--extractor-args", FAST_YOUTUBE_ARGS)
             addOption("-f", option.formatSelector.ifBlank { "bv*+ba/b" })
             if (option.kind == MediaKind.AUDIO) {
                 addOption("-x")

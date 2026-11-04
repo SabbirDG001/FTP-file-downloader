@@ -115,9 +115,12 @@ class SocialDownloader(
     override suspend fun download(task: DownloadTask, reporter: ProgressReporter): DownloadOutcome {
         val workDir = workDirFor(task)
         val cookiesFile = if (settings.current.useBrowserLogin) cookies.export() else null
-        val baseName = StorageHelper.cleanFileName(
-            task.title.ifBlank { task.fileName.substringBeforeLast('.') }
-        ).take(100).ifBlank { "video_${task.id.take(8)}" }
+        // If the title isn't known yet (standard qualities were used), let yt-dlp name the file.
+        val baseName = if (task.title.isBlank()) {
+            "%(title).100B"
+        } else {
+            StorageHelper.cleanFileName(task.title).take(100).ifBlank { "video_${task.id.take(8)}" }
+        }
 
         var knownTotal = task.totalBytes
         val downloaded = ytDlp.download(
