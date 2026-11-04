@@ -1,4 +1,4 @@
-# Media Downloader
+# MediaDL
 
 An Android app (Kotlin + Jetpack Compose) for downloading:
 
@@ -13,13 +13,13 @@ An Android app (Kotlin + Jetpack Compose) for downloading:
 | --- | --- |
 | Home | Paste a link → see thumbnail, title and duration → pick a quality (1080p, 720p, … or MP3 / M4A audio) → download. Detects links you copied in other apps. |
 | Playlists | Paste a playlist link (or tap "choose videos from it" on a video that's in one), tick the videos you want, pick one quality for all, and choose where to save them: a new folder (named after the playlist by default) or any folder on the phone or SD card. |
-| Share to app | In YouTube / Facebook / Instagram tap **Share → Media Downloader**. |
+| Share to app | In YouTube / Facebook / Instagram tap **Share → MediaDL**. |
 | Browser | Built-in browser with shortcuts to each site and a **Download** button for the page you're on. Logging in here lets the app download private posts you can see (cookies stay on the device). |
 | Servers | FTP / web-directory browser (server settings are saved) and the Direct link / Season downloader. |
-| Downloads | Live progress, speed and time left; pause, resume, cancel, retry; open, share or delete finished files; filters. History is saved and survives restarts. |
+| Downloads | "Downloading" on top, "Downloaded" below. Live progress, speed and time left; pause, resume, cancel, retry; open, share or delete finished files; filters. History is saved and survives restarts. |
 | Background | Downloads continue when the app is closed, with a progress notification (Pause all / Cancel all) and a notification when each file finishes. |
 | Accounts | Settings → Accounts shows which sites you're logged into, with a Log in button for each. |
-| Settings | Download folder, how many downloads run at once, preferred video quality and audio format, per-site sub folders, clipboard detection, yt-dlp updates, browser login. |
+| Settings | Download folder, how many downloads run at once, a total speed limit, preferred video quality and audio format, per-site sub folders, clipboard detection, yt-dlp updates, browser login. |
 
 ## Project layout
 
@@ -54,7 +54,7 @@ app/src/main/java/com/example/
 Every push is built automatically on GitHub (see `.github/workflows/build-apk.yml`):
 
 1. On your phone, open the repository on GitHub → **Releases** → **Latest test build**.
-2. Download `MediaDownloader-most-phones.apk` (or `MediaDownloader-any-phone.apk` if that one won't install).
+2. Download `MediaDL-most-phones.apk` (or `MediaDL-any-phone.apk` if that one won't install).
 3. Open the file and allow "Install unknown apps" for your browser when Android asks.
 
 If a build fails, the error is on the repository's **Actions** tab.

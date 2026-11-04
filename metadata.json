@@ -1,5 +1,5 @@
 {
-  "name": "Media Downloader",
+  "name": "MediaDL",
   "description": "Download videos and audio from YouTube, Facebook, Instagram, TikTok and more, browse FTP servers and web directories, and grab movies or whole seasons from direct links, with a background download manager (pause, resume, retry) that saves to a folder you choose.",
   "requestFramePermissions": [],
   "majorCapabilities": []

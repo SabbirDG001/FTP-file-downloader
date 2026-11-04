@@ -40,7 +40,8 @@ private const val NO_FOLDER_MESSAGE =
 /** Direct HTTP(S) links: movies, season episodes, any file URL. */
 class HttpDownloader(
     private val storage: StorageHelper,
-    private val http: HttpDirectoryClient
+    private val http: HttpDirectoryClient,
+    private val limiter: SpeedLimiter? = null
 ) : MediaDownloader {
 
     override suspend fun download(task: DownloadTask, reporter: ProgressReporter): DownloadOutcome {
@@ -55,7 +56,8 @@ class HttpDownloader(
             url = task.sourceUrl,
             resumeFrom = resumeFrom,
             openOutput = { append -> storage.openOutputStream(file, append) },
-            onProgress = { downloaded, total, speed -> reporter.onProgress(downloaded, total, speed) }
+            onProgress = { downloaded, total, speed -> reporter.onProgress(downloaded, total, speed) },
+            limiter = limiter
         )
         return DownloadOutcome(file.uri.toString(), name, size)
     }
@@ -68,7 +70,8 @@ class HttpDownloader(
 /** Files from an FTP server. Uses the server saved in the task, not a hard-coded one. */
 class FtpDownloader(
     private val storage: StorageHelper,
-    private val ftp: FtpClientManager
+    private val ftp: FtpClientManager,
+    private val limiter: SpeedLimiter? = null
 ) : MediaDownloader {
 
     override suspend fun download(task: DownloadTask, reporter: ProgressReporter): DownloadOutcome {
@@ -85,7 +88,8 @@ class FtpDownloader(
             resumeFrom = resumeFrom,
             totalBytesHint = task.totalBytes,
             openOutput = { append -> storage.openOutputStream(file, append) },
-            onProgress = { downloaded, total, speed -> reporter.onProgress(downloaded, total, speed) }
+            onProgress = { downloaded, total, speed -> reporter.onProgress(downloaded, total, speed) },
+            limiter = limiter
         )
         return DownloadOutcome(file.uri.toString(), name, size)
     }
@@ -111,9 +115,12 @@ class SocialDownloader(
     override suspend fun download(task: DownloadTask, reporter: ProgressReporter): DownloadOutcome {
         val workDir = workDirFor(task)
         val cookiesFile = if (settings.current.useBrowserLogin) cookies.export() else null
-        val baseName = StorageHelper.cleanFileName(
-            task.title.ifBlank { task.fileName.substringBeforeLast('.') }
-        ).take(100).ifBlank { "video_${task.id.take(8)}" }
+        // If the title isn't known yet (standard qualities were used), let yt-dlp name the file.
+        val baseName = if (task.title.isBlank()) {
+            "%(title).100B"
+        } else {
+            StorageHelper.cleanFileName(task.title).take(100).ifBlank { "video_${task.id.take(8)}" }
+        }
 
         var knownTotal = task.totalBytes
         val downloaded = ytDlp.download(
@@ -121,7 +128,12 @@ class SocialDownloader(
             processId = task.id,
             workDir = workDir,
             baseFileName = baseName,
-            option = DownloadRequestOptions(task.formatSelector, task.mediaKind, task.audioFormat),
+            option = DownloadRequestOptions(
+                formatSelector = task.formatSelector,
+                kind = task.mediaKind,
+                audioFormat = task.audioFormat,
+                rateLimitBytesPerSec = perDownloadLimit()
+            ),
             cookiesFile = cookiesFile
         ) { progress ->
             if (progress.totalBytes > 0) knownTotal = progress.totalBytes
@@ -145,6 +157,16 @@ class SocialDownloader(
             workDirFor(task).deleteRecursively()
             storage.deleteFile(task.outputUri)
         }
+    }
+
+    /**
+     * yt-dlp runs as its own program, so it can't share the app's speed limiter. Give each
+     * running download an equal share of the total limit instead.
+     */
+    private fun perDownloadLimit(): Long {
+        val total = settings.current.speedLimitKbps * 1024L
+        if (total <= 0) return 0L
+        return (total / settings.current.maxConcurrentDownloads.coerceAtLeast(1)).coerceAtLeast(32 * 1024L)
     }
 
     private fun workDirFor(task: DownloadTask): File =

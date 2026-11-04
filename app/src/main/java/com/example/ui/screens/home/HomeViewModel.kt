@@ -20,6 +20,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -38,7 +39,15 @@ sealed interface MediaSheetState {
 
     data class Error(val url: String, val message: String, val wholePlaylist: Boolean) : MediaSheetState
 
-    data class Ready(val info: MediaInfo, val selectedOptionId: String) : MediaSheetState {
+    /**
+     * @param provisional true while showing the standard quality list because reading the
+     * link is taking long; the real qualities replace it when they arrive.
+     */
+    data class Ready(
+        val info: MediaInfo,
+        val selectedOptionId: String,
+        val provisional: Boolean = false
+    ) : MediaSheetState {
         val selectedOption: FormatOption?
             get() = info.options.firstOrNull { it.id == selectedOptionId }
     }
@@ -73,6 +82,11 @@ data class HomeUiState(
  * Shared by the Home and Browser screens.
  */
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
+
+    private companion object {
+        /** After this long, show the standard qualities instead of waiting. */
+        const val SLOW_READ_FALLBACK_MS = 15_000L
+    }
 
     private val container = application.appContainer
     private val settings: StateFlow<AppSettings> = container.settings.settings
@@ -122,6 +136,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            // Don't keep the user waiting: if reading a single video takes long, offer the
+            // standard qualities so they can download straight away.
+            val fallbackTimer = if (!isPlaylist) launch {
+                delay(SLOW_READ_FALLBACK_MS)
+                _state.update { state ->
+                    val sheet = state.sheet
+                    if (sheet is MediaSheetState.Loading && sheet.url == url) {
+                        state.copy(sheet = provisionalSheet(url, sheet.preview))
+                    } else {
+                        state
+                    }
+                }
+            } else null
+
             val result = try {
                 Result.success(read(url, wholePlaylist).await())
             } catch (e: CancellationException) {
@@ -131,7 +159,25 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 Result.failure(e)
             }
 
-            if (_state.value.sheet !is MediaSheetState.Loading) return@launch
+            fallbackTimer?.cancel()
+
+            val current = _state.value.sheet
+            if (current is MediaSheetState.Ready && current.provisional && current.info.pageUrl == url) {
+                // The real qualities arrived while the standard list was showing.
+                result.onSuccess { fetched ->
+                    val real = sheetFor(fetched)
+                    _state.update { state ->
+                        if (state.sheet != current) return@update state
+                        val keep = (real as? MediaSheetState.Ready)?.info?.options?.any { it.id == current.selectedOptionId } == true
+                        state.copy(
+                            sheet = if (real is MediaSheetState.Ready && keep) real.copy(selectedOptionId = current.selectedOptionId) else real
+                        )
+                    }
+                }
+                return@launch
+            }
+
+            if (current !is MediaSheetState.Loading) return@launch
             _state.update {
                 it.copy(
                     sheet = result.fold(
@@ -262,7 +308,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         option: FormatOption,
         folder: String
     ): DownloadTask {
-        val baseName = StorageHelper.cleanFileName(title).take(100).ifBlank { "video" }
+        val baseName = StorageHelper.cleanFileName(title).take(100).ifBlank { "${platform.displayName} video" }
         return DownloadTask(
             fileName = "$baseName.${option.extension}",
             sourceUrl = url,
@@ -325,6 +371,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun forget(url: String, wholePlaylist: Boolean) {
         synchronized(reads) { reads.remove("$wholePlaylist|$url") }
+    }
+
+    /** The standard quality list, shown when reading the link takes too long. */
+    private fun provisionalSheet(url: String, preview: PreviewInfo?): MediaSheetState.Ready {
+        val platform = com.example.data.model.Platform.fromUrl(url)
+        val options = YtDlpJsonParser.playlistOptions()
+        val info = MediaInfo(
+            pageUrl = url,
+            title = preview?.title.orEmpty(),
+            uploader = preview?.author.orEmpty(),
+            thumbnailUrl = preview?.thumbnailUrl.orEmpty(),
+            durationSeconds = 0,
+            platform = platform,
+            options = options,
+            playlistUrl = YtDlpJsonParser.playlistUrlFor(url)
+        )
+        return MediaSheetState.Ready(info, defaultOption(options).id, provisional = true)
     }
 
     private fun sheetFor(result: FetchResult): MediaSheetState = when (result) {

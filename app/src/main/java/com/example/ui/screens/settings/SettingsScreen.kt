@@ -85,12 +85,32 @@ fun SettingsScreen(
         }
 
         Section("Downloads") {
-            Text("Downloads at the same time", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+            SettingTitle(
+                title = "Number of downloads at a time",
+                subtitle = "Others wait in the queue and start automatically"
+            )
             ChoiceRow(
                 options = listOf(1, 2, 3, 4, 5),
                 selected = settings.maxConcurrentDownloads,
                 label = { it.toString() },
                 onSelect = { value -> onUpdate { it.copy(maxConcurrentDownloads = value) } }
+            )
+            HorizontalDivider()
+            SettingTitle(
+                title = "Speed limit",
+                subtitle = "For all downloads together. Leaves internet speed for other apps."
+            )
+            ChoiceRow(
+                options = listOf(0, 256, 512, 1024, 2048, 5120, 10240),
+                selected = settings.speedLimitKbps,
+                label = { kbps ->
+                    when {
+                        kbps == 0 -> "No limit"
+                        kbps < 1024 -> "$kbps KB/s"
+                        else -> "${kbps / 1024} MB/s"
+                    }
+                },
+                onSelect = { value -> onUpdate { it.copy(speedLimitKbps = value) } }
             )
             HorizontalDivider()
             Text("Preferred video quality", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
@@ -174,7 +194,7 @@ fun SettingsScreen(
         }
 
         Section("About") {
-            Text("Media Downloader ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
+            Text("MediaDL ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
             Text(
                 text = "Only download videos you own or have permission to save. Respect each site's terms of service and copyright.",
                 style = MaterialTheme.typography.bodySmall,
@@ -201,6 +221,14 @@ private fun Section(title: String, content: @Composable () -> Unit) {
                 content()
             }
         }
+    }
+}
+
+@Composable
+private fun SettingTitle(title: String, subtitle: String) {
+    Column {
+        Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

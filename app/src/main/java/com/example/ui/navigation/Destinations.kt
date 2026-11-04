@@ -9,7 +9,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 
 /** Screens in the bottom navigation bar, plus settings. */
 enum class Destination(val route: String, val label: String, val title: String, val icon: ImageVector?) {
-    HOME("home", "Home", "Media Downloader", Icons.Default.Home),
+    HOME("home", "Home", "MediaDL", Icons.Default.Home),
     BROWSER("browser", "Browser", "Browser", Icons.Default.Public),
     SERVERS("servers", "Servers", "Servers & Links", Icons.Default.Dns),
     DOWNLOADS("downloads", "Downloads", "Downloads", Icons.Default.Download),

@@ -223,7 +223,26 @@ private fun VideoContent(state: MediaSheetState.Ready, actions: MediaSheetAction
     ScrollingWithPinnedButton(
         content = {
             item {
-                MediaHeader(info.title, info.uploader, info.thumbnailUrl, info.durationSeconds, info.platform)
+                MediaHeader(
+                    title = info.title.ifBlank { "${info.platform.displayName} video" },
+                    subtitle = info.uploader,
+                    thumbnailUrl = info.thumbnailUrl,
+                    durationSeconds = info.durationSeconds,
+                    platform = info.platform
+                )
+            }
+            if (state.provisional) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "This video is slow to read, so here are the standard qualities. You can download now; exact sizes appear when ready.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
             if (info.playlistUrl != null) {
                 item {

@@ -43,10 +43,13 @@ object YtDlpJsonParser {
 
     private fun parsePlaylist(root: JSONObject, pageUrl: String, platform: Platform): PlaylistInfo {
         val entries = mutableListOf<PlaylistEntry>()
+        val seenIds = mutableSetOf<String>()
         val array = root.optJSONArray("entries") ?: JSONArray()
         for (i in 0 until array.length()) {
             val entry = array.optJSONObject(i) ?: continue
             val id = entry.optStringOrNull("id") ?: continue
+            // Playlists can list the same video twice; the list on screen needs unique ids.
+            if (!seenIds.add(id)) continue
             val title = entry.optStringOrNull("title") ?: continue
             // Skip deleted / private videos, which YouTube lists with placeholder titles.
             if (title == "[Deleted video]" || title == "[Private video]") continue

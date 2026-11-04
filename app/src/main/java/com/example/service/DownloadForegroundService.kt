@@ -80,7 +80,12 @@ class DownloadForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Must call startForeground quickly after startForegroundService, whatever the action.
-        startInForeground()
+        // If Android refuses (e.g. the daily limit for background transfers is used up), stop
+        // right away: a service that never becomes "foreground" makes Android close the app.
+        if (!startInForeground()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val engine = appContainer.downloadEngine
         when (intent?.action) {
             ACTION_PAUSE_ALL -> engine.pauseAll()
@@ -90,17 +95,37 @@ class DownloadForegroundService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startInForeground() {
+    /**
+     * Android 15+ limits this kind of background work to about 6 hours a day and calls this
+     * when the time is up. We must stop within seconds or the app is closed, so pause
+     * everything (the user can resume later) and stop.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        handleTimeout()
+    }
+
+    override fun onTimeout(startId: Int) {
+        handleTimeout()
+    }
+
+    private fun handleTimeout() {
+        runCatching { appContainer.downloadEngine.pauseAll() }
+        stopSelfCleanly()
+    }
+
+    private fun startInForeground(): Boolean {
         val notification = buildProgressNotification(null, 0)
-        try {
+        return try {
             ServiceCompat.startForeground(
                 this,
                 NOTIFICATION_ID,
                 notification,
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
             )
+            true
         } catch (e: Exception) {
             e.printStackTrace()
+            false
         }
     }
 
@@ -151,7 +176,7 @@ class DownloadForegroundService : Service() {
 
         if (current == null) {
             return builder
-                .setContentTitle("Media Downloader")
+                .setContentTitle("MediaDL")
                 .setContentText("Preparing downloads…")
                 .setProgress(100, 0, true)
                 .build()
@@ -224,7 +249,7 @@ class DownloadForegroundService : Service() {
     }
 
     private fun stopSelfCleanly() {
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         stopSelf()
     }
 

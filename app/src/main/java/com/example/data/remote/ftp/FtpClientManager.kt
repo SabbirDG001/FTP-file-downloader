@@ -1,5 +1,6 @@
 package com.example.data.remote.ftp
 
+import com.example.data.download.SpeedLimiter
 import com.example.data.model.FtpServerConfig
 import com.example.data.model.RemoteFileItem
 import kotlinx.coroutines.Dispatchers
@@ -83,7 +84,8 @@ class FtpClientManager {
         resumeFrom: Long,
         totalBytesHint: Long,
         openOutput: (append: Boolean) -> OutputStream,
-        onProgress: (downloaded: Long, total: Long, speedBytesPerSec: Long) -> Unit
+        onProgress: (downloaded: Long, total: Long, speedBytesPerSec: Long) -> Unit,
+        limiter: SpeedLimiter? = null
     ): Long = withContext(Dispatchers.IO) {
         val client = openClient(config, dataTimeoutSeconds = 60)
         try {
@@ -111,7 +113,7 @@ class FtpClientManager {
             var downloaded = offset
             openOutput(offset > 0).use { out ->
                 stream.use { source ->
-                    downloaded = copyWithProgress(source, out, offset, expectedSize, onProgress)
+                    downloaded = copyWithProgress(source, out, offset, expectedSize, onProgress, limiter)
                 }
             }
 
@@ -176,7 +178,8 @@ internal suspend fun copyWithProgress(
     output: OutputStream,
     startOffset: Long,
     totalBytes: Long,
-    onProgress: (downloaded: Long, total: Long, speedBytesPerSec: Long) -> Unit
+    onProgress: (downloaded: Long, total: Long, speedBytesPerSec: Long) -> Unit,
+    limiter: SpeedLimiter? = null
 ): Long {
     val buffer = ByteArray(64 * 1024)
     var downloaded = startOffset
@@ -188,6 +191,7 @@ internal suspend fun copyWithProgress(
         context.ensureActive()
         val read = input.read(buffer)
         if (read < 0) break
+        limiter?.acquire(read)
         output.write(buffer, 0, read)
         downloaded += read
         bytesSinceUpdate += read

@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.asStateFlow
 data class AppSettings(
     /** How many files download at the same time. */
     val maxConcurrentDownloads: Int = 2,
+    /** Total download speed limit in KB/s for all downloads together (0 = no limit). */
+    val speedLimitKbps: Int = 0,
     /** Quality picked by default in the format sheet (0 = best available). */
     val preferredVideoHeight: Int = 720,
     /** "mp3" or "m4a". */
@@ -49,6 +51,7 @@ class SettingsRepository(context: Context) {
         val defaultServer = defaults.server
         return AppSettings(
             maxConcurrentDownloads = prefs.getInt(KEY_MAX_CONCURRENT, defaults.maxConcurrentDownloads),
+            speedLimitKbps = prefs.getInt(KEY_SPEED_LIMIT, defaults.speedLimitKbps),
             preferredVideoHeight = prefs.getInt(KEY_VIDEO_HEIGHT, defaults.preferredVideoHeight),
             preferredAudioFormat = prefs.getString(KEY_AUDIO_FORMAT, null) ?: defaults.preferredAudioFormat,
             platformSubfolders = prefs.getBoolean(KEY_PLATFORM_FOLDERS, defaults.platformSubfolders),
@@ -74,6 +77,7 @@ class SettingsRepository(context: Context) {
     private fun save(s: AppSettings) {
         prefs.edit {
             putInt(KEY_MAX_CONCURRENT, s.maxConcurrentDownloads)
+            putInt(KEY_SPEED_LIMIT, s.speedLimitKbps)
             putInt(KEY_VIDEO_HEIGHT, s.preferredVideoHeight)
             putString(KEY_AUDIO_FORMAT, s.preferredAudioFormat)
             putBoolean(KEY_PLATFORM_FOLDERS, s.platformSubfolders)
@@ -94,6 +98,7 @@ class SettingsRepository(context: Context) {
 
     private companion object {
         const val KEY_MAX_CONCURRENT = "max_concurrent"
+        const val KEY_SPEED_LIMIT = "speed_limit_kbps"
         const val KEY_VIDEO_HEIGHT = "video_height"
         const val KEY_AUDIO_FORMAT = "audio_format"
         const val KEY_PLATFORM_FOLDERS = "platform_folders"
